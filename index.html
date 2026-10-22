@@ -1,705 +1,1428 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="en-ZA">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#111418">
-<title>S5 Live Buses</title>
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0a0e14">
+<meta name="description" content="Never miss the Gautrain S5 bus between Sandton Station and Montecasino: live bus GPS, countdowns, leave-by alerts, route map and weekday timetable.">
+<title>S5 Bus Tracker · Sandton ⇄ Montecasino</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+<!-- Line icons adapted from Feather Icons (MIT licence). -->
 <style>
-  :root {
-    --bg: #f6f5f1; --panel: #ffffff; --ink: #15181c; --muted: #5f6670; --line: #e3e1da;
-    --gold: #b8860b; --gold-soft: #f6ecd2; --ok: #1f7a46; --ok-soft: #e2f3e8;
-    --warn: #a35a00; --warn-soft: #fbead2; --bad: #b42318; --bad-soft: #fde4e1;
-    --bus: #c8102e; --bus-other: #6b7280; --me: #1d4ed8;
-    --shadow: 0 6px 24px rgba(0,0,0,.12);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #0f1215; --panel: #181c21; --ink: #eef0f2; --muted: #9aa3ad; --line: #2a3038;
-      --gold: #e0b44a; --gold-soft: #3a3020; --ok: #4ade80; --ok-soft: #173325;
-      --warn: #fbbf24; --warn-soft: #3b2e12; --bad: #f87171; --bad-soft: #3d1a1a;
-      --bus: #ff4d5e; --bus-other: #8b949e; --me: #60a5fa; --shadow: 0 6px 24px rgba(0,0,0,.5);
-    }
-  }
-  :root[data-theme="dark"] {
-    --bg: #0f1215; --panel: #181c21; --ink: #eef0f2; --muted: #9aa3ad; --line: #2a3038;
-    --gold: #e0b44a; --gold-soft: #3a3020; --ok: #4ade80; --ok-soft: #173325;
-    --warn: #fbbf24; --warn-soft: #3b2e12; --bad: #f87171; --bad-soft: #3d1a1a;
-    --bus: #ff4d5e; --bus-other: #8b949e; --me: #60a5fa; --shadow: 0 6px 24px rgba(0,0,0,.5);
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
-  body {
-    background: var(--bg); color: var(--ink);
-    font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    display: flex; flex-direction: column; overflow: hidden;
-  }
-  header {
-    display: flex; align-items: center; gap: 10px; padding: 10px 16px;
-    padding-top: max(10px, env(safe-area-inset-top));
-    background: var(--panel); border-bottom: 1px solid var(--line); z-index: 1000;
-  }
-  header h1 { font-size: 17px; margin: 0; font-weight: 700; letter-spacing: -.01em; }
-  header h1 b { color: var(--gold); }
-  header h1 small { display: block; font-size: 12px; font-weight: 500; color: var(--muted); }
-  .pill {
-    margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
-    font-size: 12.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
-    background: var(--line); color: var(--muted); white-space: nowrap;
-  }
-  .pill i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-  .pill.live { background: var(--ok-soft); color: var(--ok); }
-  .pill.live i { animation: pulse 1.6s infinite; }
-  .pill.err { background: var(--bad-soft); color: var(--bad); }
-  @keyframes pulse { 50% { opacity: .25; } }
-  .iconbtn {
-    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
-    border-radius: 10px; width: 36px; height: 36px; font-size: 18px; cursor: pointer;
-  }
-  #map { flex: 1; min-height: 0; background: var(--bg); }
-  .sheet {
-    background: var(--panel); border-top: 1px solid var(--line); box-shadow: var(--shadow);
-    padding: 12px 16px; padding-bottom: max(12px, env(safe-area-inset-bottom));
-    max-height: 48vh; overflow-y: auto; z-index: 1000;
-  }
-  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .row + .row { margin-top: 10px; }
-  label.small { font-size: 12.5px; color: var(--muted); font-weight: 600; }
-  select, input[type=number], input[type=url], input[type=text] {
-    font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
-    border-radius: 10px; padding: 7px 10px; min-width: 0;
-  }
-  input[type=number] { width: 68px; }
-  button.btn {
-    font: inherit; font-weight: 600; border-radius: 10px; padding: 8px 12px; cursor: pointer;
-    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
-  }
-  button.btn.primary { background: var(--gold); border-color: var(--gold); color: #111; }
-  button.btn.on { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
-  .banner {
-    border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; font-size: 14px;
-    background: var(--gold-soft); color: var(--ink);
-  }
-  .banner.err { background: var(--bad-soft); }
-  .banner.alarm { background: var(--bad); color: #fff; font-weight: 700; font-size: 16px; }
-  .banner[hidden] { display: none; }
-  .list { margin-top: 10px; display: grid; gap: 8px; }
-  .bus {
-    display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center;
-    border: 1px solid var(--line); border-radius: 12px; padding: 9px 10px; cursor: pointer;
-  }
-  .bus.watch { border-color: var(--gold); background: var(--gold-soft); }
-  .bus .tag {
-    font-weight: 800; font-size: 12px; color: #fff; background: var(--bus);
-    border-radius: 8px; padding: 4px 6px; min-width: 38px; text-align: center;
-  }
-  .bus .tag.other { background: var(--bus-other); }
-  .bus .eta { text-align: right; font-weight: 800; font-size: 18px; font-variant-numeric: tabular-nums; }
-  .bus .eta small { display: block; font-weight: 500; font-size: 11.5px; color: var(--muted); }
-  .bus .meta { font-size: 12.5px; color: var(--muted); }
-  .bus .meta b { color: var(--ink); font-weight: 600; }
-  .away { color: var(--muted) !important; }
-  .near { color: var(--warn) !important; }
-  .now { color: var(--bad) !important; }
-  .muted { color: var(--muted); font-size: 13px; }
-  dialog {
-    border: none; border-radius: 16px; padding: 0; width: min(560px, calc(100vw - 32px));
-    background: var(--panel); color: var(--ink); box-shadow: var(--shadow);
-  }
-  dialog::backdrop { background: rgba(0,0,0,.45); }
-  dialog .in { padding: 16px; display: grid; gap: 12px; max-height: 80vh; overflow-y: auto; }
-  dialog h2 { margin: 0; font-size: 17px; }
-  dialog .f { display: grid; gap: 4px; }
-  dialog .f input { width: 100%; }
-  pre.raw {
-    margin: 0; padding: 10px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line);
-    font-size: 11.5px; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-all;
-  }
-  .busicon { position: relative; }
-  .busicon .dot {
-    width: 30px; height: 30px; border-radius: 50%; background: var(--bus); color: #fff;
-    border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.35);
-    display: grid; place-items: center; font: 800 10px system-ui, sans-serif;
-  }
-  .busicon.other .dot { background: var(--bus-other); }
-  .busicon.stale .dot { opacity: .45; }
-  .busicon.watch .dot { outline: 3px solid var(--gold); outline-offset: 1px; }
-  .busicon .arrow {
-    position: absolute; left: 50%; top: 50%; width: 0; height: 0; margin: -25px 0 0 -6px;
-    border-left: 6px solid transparent; border-right: 6px solid transparent;
-    border-bottom: 9px solid var(--bus); transform-origin: 6px 25px;
-  }
-  .busicon.other .arrow { border-bottom-color: var(--bus-other); }
-  .meicon {
-    width: 22px; height: 22px; border-radius: 50%; background: var(--me);
-    border: 3px solid #fff; box-shadow: 0 0 0 6px color-mix(in srgb, var(--me) 30%, transparent);
-  }
-  .leaflet-container { font: inherit; }
+:root{
+  color-scheme:dark;
+  --bg:#0a0e14;--surface:#121a24;--surface-2:#18222f;--surface-3:#223044;--line:#273446;
+  --text:#eef2f7;--muted:#9fb0c4;--faint:#74859b;
+  --gold:#f4b63f;--gold-2:#ffd27a;--gold-ink:#1d1400;
+  --green:#3ddc97;--amber:#ffc24b;--red:#ff6b6b;--blue:#7cb7ff;
+  --radius:18px;--nav-h:66px;--row:56px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);background-image:radial-gradient(900px 480px at 50% -180px,#1b2a42 0%,rgba(10,14,20,0) 70%);background-repeat:no-repeat;color:var(--text);font:15px/1.4 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased;min-height:100vh}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer;-webkit-tap-highlight-color:transparent}
+button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+svg{display:block}
+.app{max-width:480px;margin:0 auto;padding:0 14px calc(var(--nav-h) + 28px)}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.muted{color:var(--muted)}
+.tab[hidden]{display:none}
+
+/* top bar */
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;padding:12px 0 10px;background:linear-gradient(var(--bg) 78%,rgba(10,14,20,0))}
+.badge{width:42px;height:42px;flex:none;border-radius:12px;background:var(--gold);color:var(--gold-ink);display:grid;place-items:center;font-weight:850;font-size:16px;box-shadow:0 6px 18px rgba(244,182,63,.28);position:relative}
+.badge .ldot{position:absolute;top:-3px;inset-inline-end:-3px;width:12px;height:12px;border-radius:50%;border:2px solid var(--bg);background:var(--faint)}
+.badge .ldot.on{background:var(--green);animation:blink 2s ease-in-out infinite}
+.badge .ldot.err{background:var(--red)}
+@keyframes blink{50%{box-shadow:0 0 0 4px rgba(61,220,151,.25)}}
+.brand{flex:1;min-width:0}
+.brand-title{font-weight:750;font-size:17px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brand-sub{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.clock{text-align:end;font-variant-numeric:tabular-nums;flex:none}
+.clock-time{font-weight:750;font-size:17px;line-height:1.15}
+.clock-time small{color:var(--muted);font-size:12px;font-weight:650}
+.clock-date{color:var(--muted);font-size:11px;white-space:nowrap}
+.icon-btn{flex:none;width:40px;height:40px;border-radius:12px;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;position:relative;padding:0}
+.icon-btn svg{width:20px;height:20px}
+.count{position:absolute;top:-6px;inset-inline-end:-6px;min-width:19px;height:19px;padding:0 5px;border-radius:10px;background:var(--gold);color:var(--gold-ink);font-size:11px;font-weight:800;display:grid;place-items:center}
+.count[hidden]{display:none}
+
+/* direction + trip */
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.seg button{min-height:38px;border:0;border-radius:10px;background:transparent;color:var(--muted);font-weight:700;font-size:14px}
+.seg button[aria-pressed="true"]{background:var(--gold);color:var(--gold-ink)}
+.trip{margin-top:10px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;display:grid;grid-template-columns:16px 1fr;column-gap:10px;align-items:center}
+.trip .pin{width:12px;height:12px;border-radius:50%;border:3px solid var(--gold);justify-self:center;margin-top:14px}
+.trip .pin.to{border-radius:3px;background:var(--blue);border-color:var(--blue)}
+.trip .conn{align-self:stretch;justify-self:center;width:2px;min-height:18px;background:repeating-linear-gradient(var(--faint) 0 3px,transparent 3px 6px)}
+.trip-caption{font-size:12px;color:var(--muted);padding:4px 0}
+.field-label{display:block;font-size:10.5px;font-weight:750;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin-bottom:3px}
+.sel-wrap{position:relative}
+.sel-wrap select{width:100%;appearance:none;-webkit-appearance:none;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding-block:8px;padding-inline:10px 32px;font-size:14px;font-weight:650;color:var(--text);text-overflow:ellipsis}
+.sel-wrap .chev{position:absolute;inset-inline-end:10px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--muted)}
+.sel-wrap .chev svg{width:16px;height:16px}
+select option{background:#121a24;color:#eef2f7}
+
+/* banner */
+.banner{display:flex;gap:10px;align-items:flex-start;margin-top:12px;padding:10px 12px;border-radius:14px;font-size:13.5px;border:1px solid var(--line);background:var(--surface)}
+.banner .dot{flex:none;width:9px;height:9px;border-radius:50%;margin-top:5px;background:var(--green);box-shadow:0 0 0 4px rgba(61,220,151,.15)}
+.banner.warn{border-color:rgba(255,194,75,.35);background:rgba(255,194,75,.07)}
+.banner.warn .dot{background:var(--amber);box-shadow:0 0 0 4px rgba(255,194,75,.15)}
+.banner.alert{border-color:rgba(255,107,107,.45);background:rgba(255,107,107,.08)}
+.banner.alert .dot{background:var(--red);box-shadow:0 0 0 4px rgba(255,107,107,.15)}
+
+/* hero */
+.hero{margin-top:12px;border-radius:22px;padding:16px;background:linear-gradient(160deg,#1e2c41 0%,#131b26 72%);border:1px solid var(--line);position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;inset-inline-end:-50px;top:-60px;width:190px;height:190px;border-radius:50%;background:radial-gradient(circle,rgba(244,182,63,.16),rgba(244,182,63,0) 70%);pointer-events:none}
+.eyebrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:750}
+.tag{display:inline-block;font-size:10.5px;line-height:1;padding:4px 7px;border-radius:999px;background:var(--surface-3);color:var(--text);letter-spacing:.04em;font-weight:750;text-transform:uppercase;vertical-align:1px}
+.tag.gold{background:var(--gold);color:var(--gold-ink)}
+.tag.red{background:rgba(255,107,107,.18);color:#ff9a9a}
+.hero-main{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-top:8px}
+.hero-time{font-size:48px;font-weight:850;letter-spacing:-.02em;line-height:.95;font-variant-numeric:tabular-nums}
+.hero-cd{text-align:end}
+.hero-cd .lbl{color:var(--muted);font-size:12px}
+.hero-cd .val{font-size:26px;font-weight:850;color:var(--gold);font-variant-numeric:tabular-nums;line-height:1.1}
+.hero-route{margin-top:10px;color:var(--muted);font-size:13.5px}
+.hero-route b{color:var(--text);font-weight:650}
+.status{margin-top:14px;border-radius:14px;padding:12px;display:flex;gap:12px;align-items:center;border:1px solid var(--line);background:var(--surface-2)}
+.status .ico{flex:none;width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:var(--surface-3)}
+.status .ico svg{width:20px;height:20px}
+.status .big{font-weight:800;font-size:17px;font-variant-numeric:tabular-nums}
+.status .small{font-size:12.5px;color:var(--muted);margin-top:1px}
+.status .small b{color:var(--text)}
+.status.ok{background:rgba(61,220,151,.09);border-color:rgba(61,220,151,.35)}
+.status.ok .big,.status.ok .ico{color:var(--green)}
+.status.soon{background:rgba(255,194,75,.1);border-color:rgba(255,194,75,.45)}
+.status.soon .big,.status.soon .ico{color:var(--amber)}
+.status.go{background:rgba(255,107,107,.12);border-color:rgba(255,107,107,.55);animation:pulse 1.2s ease-in-out infinite}
+.status.go .big,.status.go .ico{color:var(--red)}
+@keyframes pulse{50%{box-shadow:0 0 0 6px rgba(255,107,107,.14)}}
+.linklike{background:none;border:0;padding:0;color:var(--gold-2);font-size:inherit;font-weight:650;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
+.where{display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px;color:var(--muted)}
+.where svg{width:18px;height:18px;flex:none;color:var(--gold)}
+.where b{color:var(--text)}
+.est{font-style:normal;font-size:10.5px;color:var(--faint);border:1px solid var(--line);border-radius:6px;padding:0 4px;margin-inline-start:4px;white-space:nowrap}
+.actions{display:flex;gap:10px;margin-top:14px}
+.btn{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface-2);font-weight:700;font-size:14px}
+.btn svg{width:18px;height:18px}
+.btn.primary{background:var(--gold);border-color:var(--gold);color:var(--gold-ink)}
+.btn.armed{background:rgba(244,182,63,.12);border-color:rgba(244,182,63,.55);color:var(--gold-2)}
+.livebox{margin-top:12px;border-radius:14px;padding:10px 12px;display:flex;gap:10px;align-items:center;border:1px solid rgba(124,183,255,.35);background:rgba(124,183,255,.08);font-size:13px;color:var(--muted)}
+.livebox svg{width:18px;height:18px;flex:none;color:var(--blue)}
+.livebox b{color:var(--text)}
+.livebox .late{color:var(--amber);font-weight:750}
+.livebox .early{color:var(--red);font-weight:750}
+.livebox .ontime{color:var(--green);font-weight:750}
+.livebox.quiet{border-color:var(--line);background:var(--surface-2)}
+.livebox.quiet svg{color:var(--faint)}
+.gps{font-style:normal;font-size:10px;font-weight:850;letter-spacing:.06em;color:#00152b;background:var(--blue);border-radius:5px;padding:1px 5px;margin-inline-start:4px;vertical-align:1px;white-space:nowrap}
+.hero-cd .val.livev{color:var(--blue)}
+.missed{display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-size:12.5px;color:var(--muted);padding:9px 12px;border-radius:12px;border:1px dashed var(--line)}
+.missed svg{width:16px;height:16px;flex:none;margin-top:1px}
+.missed b{color:var(--text)}
+
+/* lists */
+.section-title{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:22px 4px 8px;font-size:12.5px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}
+.section-title .aside{font-weight:600;text-transform:none;letter-spacing:0;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.list{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.row{display:grid;grid-template-columns:66px 1fr auto;gap:10px;align-items:center;padding-block:11px;padding-inline:14px 12px;border-top:1px solid var(--line)}
+.row:first-child{border-top:0}
+.row .t{font-size:21px;font-weight:800;font-variant-numeric:tabular-nums}
+.row .meta{font-size:12.5px;color:var(--muted)}
+.row .meta b{color:var(--text);font-weight:650}
+.bell{width:42px;height:42px;border-radius:12px;border:1px solid var(--line);background:var(--surface-2);display:grid;place-items:center;color:var(--muted);padding:0}
+.bell svg{width:19px;height:19px}
+.bell.on{color:var(--gold);border-color:rgba(244,182,63,.55);background:rgba(244,182,63,.12)}
+
+/* cards */
+.card{margin-top:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+.card h3{margin:0;font-size:15px}
+.card p{margin:6px 0 0;font-size:13px;color:var(--muted)}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.chip{min-height:34px;padding:0 13px;border-radius:999px;border:1px solid var(--line);background:var(--surface-2);font-size:13px;font-weight:700}
+.chip[aria-pressed="true"]{background:var(--gold);border-color:var(--gold);color:var(--gold-ink)}
+.call{display:flex;align-items:center;gap:12px;margin-top:12px;padding:10px 12px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line);color:var(--text);text-decoration:none}
+.call .ci{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:rgba(61,220,151,.14);color:var(--green);flex:none}
+.call .ci svg{width:18px;height:18px}
+.call small{display:block;color:var(--muted);font-size:12px}
+.call .ci.live{background:rgba(124,183,255,.14);color:var(--blue)}
+.live-link{display:flex;width:100%;margin-top:12px;text-decoration:none;color:var(--text)}
+.live-link svg{color:var(--blue)}
+
+/* route tracker */
+.route-head{margin-top:12px}
+.route-head h2{margin:0;font-size:17px}
+.route-head p{margin:4px 0 0;font-size:13px;color:var(--muted)}
+.route-head p b{color:var(--text)}
+.legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;font-size:11.5px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.lg{width:16px;height:10px;border-radius:5px;display:inline-block;background:#e9eef6}
+.lg.you{background:var(--gold)}
+.lg.ring{width:12px;height:12px;border-radius:50%;background:transparent;border:3px solid var(--gold)}
+.lg.off{width:12px;height:12px;border-radius:50%;background:transparent;border:3px solid var(--blue)}
+.track-cap{display:flex;justify-content:space-between;margin:14px 4px 6px;font-size:11px;font-weight:750;letter-spacing:.07em;text-transform:uppercase;color:var(--faint)}
+.track{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius)}
+.rail{position:absolute;inset-inline-start:78px;width:4px;border-radius:2px;background:var(--surface-3)}
+.rail-done{position:absolute;inset-inline-start:78px;width:4px;border-radius:2px;background:linear-gradient(var(--gold-2),var(--gold))}
+.stop{position:absolute;inset-inline:0;height:var(--row);display:grid;grid-template-columns:96px 1fr auto;align-items:center;padding-inline-end:12px}
+.stop .node{margin-inline-start:73px;width:14px;height:14px;border-radius:50%;background:var(--surface);border:3px solid var(--faint);position:relative;z-index:1}
+.stop.term .node{width:18px;height:18px;margin-inline-start:71px;border-color:var(--text)}
+.stop.passed .node{border-color:var(--gold);background:var(--gold)}
+.stop.board .node{border-color:var(--gold);box-shadow:0 0 0 5px rgba(244,182,63,.22)}
+.stop.alight .node{border-color:var(--blue);box-shadow:0 0 0 5px rgba(124,183,255,.2)}
+.stxt{min-width:0}
+.stop .nm{font-size:13.5px;font-weight:650;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.stop .ar{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stop .tm{font-variant-numeric:tabular-nums;font-weight:750;font-size:13.5px;padding-inline-start:8px}
+.stop.passed .nm,.stop.passed .tm{color:var(--faint)}
+.flag{display:inline-block;font-size:9.5px;font-weight:850;padding:2px 5px;border-radius:5px;margin-inline-start:6px;letter-spacing:.05em;vertical-align:1px}
+.flag.board{background:var(--gold);color:var(--gold-ink)}
+.flag.alight{background:var(--blue);color:#00152b}
+.bus{position:absolute;inset-inline-start:6px;height:26px;margin-top:-13px;padding:0 7px;border-radius:13px;display:flex;align-items:center;gap:4px;background:#e9eef6;color:#0a0e14;font-size:11.5px;font-weight:800;font-variant-numeric:tabular-nums;box-shadow:0 4px 12px rgba(0,0,0,.45);z-index:3}
+.bus svg{width:14px;height:14px}
+.bus::after{content:"";position:absolute;inset-inline-start:100%;top:50%;width:8px;height:2px;margin-top:-1px;background:inherit}
+.bus.you{background:var(--gold);color:var(--gold-ink);box-shadow:0 0 0 4px rgba(244,182,63,.25),0 6px 16px rgba(0,0,0,.5);z-index:4}
+.bus.sched{background:var(--surface);color:var(--gold);border:1.5px dashed var(--gold);box-shadow:none}
+.bus.sched::after{background:var(--gold)}
+.bus.est{background:var(--surface-3);color:var(--muted);box-shadow:none;border:1.5px dashed var(--faint)}
+.bus.est::after{background:var(--faint)}
+.bus.est.you{background:var(--surface);color:var(--gold);border-color:var(--gold)}
+.bus.live .lv{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(61,220,151,.3)}
+.livebar{display:flex;align-items:center;gap:8px;margin-top:12px;padding:9px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);font-size:12.5px;color:var(--muted)}
+.livebar .d{width:8px;height:8px;border-radius:50%;flex:none;background:var(--faint)}
+.livebar.on .d{background:var(--green);box-shadow:0 0 0 4px rgba(61,220,151,.18)}
+.livebar.err .d{background:var(--red)}
+.livebar b{color:var(--text)}
+.mapcard{position:relative;margin-top:12px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--surface-2)}
+#routeMap{height:300px;background:var(--surface-2)}
+.mapcard.tall #routeMap{height:62vh}
+.mapcard .mapbtns{position:absolute;inset-inline-end:10px;top:10px;z-index:500;display:flex;flex-direction:column;gap:6px}
+.mapcard .mapbtns button{width:36px;height:36px;border-radius:10px;border:1px solid var(--line);background:rgba(18,26,36,.92);color:var(--text);display:grid;place-items:center;padding:0}
+.mapcard .mapbtns svg{width:18px;height:18px}
+.mapcard .nomap{position:absolute;inset:0;display:grid;place-items:center;padding:20px;text-align:center;font-size:13px;color:var(--muted)}
+.leaflet-container{font:inherit;background:var(--surface-2)}
+.leaflet-control-attribution{background:rgba(10,14,20,.75)!important;color:var(--faint)!important;font-size:10px}
+.leaflet-control-attribution a{color:var(--muted)!important}
+.lbus{display:flex;align-items:center;gap:4px;height:24px;padding:0 7px;border-radius:12px;background:#e9eef6;color:#0a0e14;font:800 11px/1 ui-sans-serif,system-ui,sans-serif;font-variant-numeric:tabular-nums;white-space:nowrap;box-shadow:0 3px 10px rgba(0,0,0,.55);transform:translate(-50%,-50%);width:max-content;position:relative}
+.lbus.you{background:var(--gold);color:var(--gold-ink);box-shadow:0 0 0 4px rgba(244,182,63,.3),0 3px 10px rgba(0,0,0,.55)}
+.lbus.other{background:#556275;color:#e9eef6}
+.lbus.old{opacity:.5}
+.lbus .ar{width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:6px solid currentColor}
+.mstop{width:10px;height:10px;border-radius:50%;background:var(--surface);border:2.5px solid var(--faint);transform:translate(-50%,-50%)}
+.mstop.board{width:16px;height:16px;border-color:var(--gold);border-width:4px;box-shadow:0 0 0 5px rgba(244,182,63,.25)}
+.mstop.alight{width:15px;height:15px;border-radius:4px;border-color:var(--blue);background:var(--blue);box-shadow:0 0 0 5px rgba(124,183,255,.22)}
+.mstop.me{width:16px;height:16px;background:var(--blue);border:3px solid #fff;box-shadow:0 0 0 6px rgba(124,183,255,.25)}
+.foot{font-size:12px;color:var(--faint);margin:10px 4px 0}
+
+/* timetable */
+.tt-head{margin-top:12px}
+.tt-head h2{margin:0;font-size:17px}
+.tt-head p{margin:4px 0 12px;font-size:13px;color:var(--muted)}
+.hour{display:grid;grid-template-columns:50px 1fr;gap:10px;padding:10px 12px;border-top:1px solid var(--line)}
+.hour:first-child{border-top:0}
+.hour .h{font-weight:850;font-size:19px;font-variant-numeric:tabular-nums;line-height:1.1}
+.hour .fq{font-size:10.5px;color:var(--faint);margin-top:2px}
+.slots{display:flex;flex-wrap:wrap;gap:6px}
+.slot{min-width:64px;padding:6px 8px;border-radius:10px;background:var(--surface-2);border:1px solid var(--line);text-align:center;font-variant-numeric:tabular-nums}
+.slot b{display:block;font-size:15px;font-weight:800}
+.slot small{display:block;font-size:10.5px;color:var(--muted)}
+.slot.past{opacity:.35}
+.slot.next{border-color:var(--gold);box-shadow:inset 0 0 0 1px var(--gold)}
+.slot.alarm{background:rgba(244,182,63,.14);border-color:rgba(244,182,63,.6)}
+.slot.alarm b{color:var(--gold-2)}
+.slot.lastbus small{color:#ff9a9a}
+
+/* plan */
+.plan-row{margin-top:12px}
+.plan-row label{display:block}
+input[type=time]{width:100%;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:9px 10px;font-size:17px;font-weight:750;color:var(--text)}
+.plan-out{margin-top:14px;border-top:1px solid var(--line);padding-top:14px}
+.plan-out h4{margin:0;font-size:16px}
+.plan-out .sub{font-size:12.5px;color:var(--muted);margin-top:2px}
+.journey{list-style:none;margin:14px 0 0;padding:0}
+.journey li{display:grid;grid-template-columns:58px 18px 1fr;gap:8px;align-items:start;padding-bottom:14px;position:relative}
+.journey .jt{font-weight:800;font-variant-numeric:tabular-nums}
+.journey .jd{width:12px;height:12px;border-radius:50%;margin-top:4px;border:3px solid var(--gold);background:var(--surface)}
+.journey li.bus-step .jd{background:var(--gold)}
+.journey li.end-step .jd{border-color:var(--blue);background:var(--blue);border-radius:3px}
+.journey li:not(:last-child)::before{content:"";position:absolute;inset-inline-start:71px;top:18px;bottom:0;width:2px;background:var(--line)}
+.journey .jx{font-size:13.5px}
+.journey .jx small{display:block;color:var(--muted);font-size:12px}
+.backup{margin-top:2px;font-size:13px;color:var(--muted);padding:10px 12px;border-radius:12px;background:var(--surface-2)}
+.backup b{color:var(--text)}
+.plan-out .btn{margin-top:12px;width:100%}
+
+/* overlays */
+.overlay{position:fixed;inset:0;z-index:50;display:none;align-items:flex-end;justify-content:center;background:rgba(4,7,11,.72);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);padding:16px}
+.overlay.open{display:flex}
+#alarm{align-items:center}
+.sheet{width:100%;max-width:460px;max-height:88vh;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:24px;padding:18px}
+.sheet-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.sheet-head h2{margin:0;font-size:18px}
+.set-row{padding:12px 0;border-top:1px solid var(--line)}
+.sheet-head + .set-row{border-top:0}
+.set-row .lbl{display:flex;justify-content:space-between;gap:10px;font-weight:650;font-size:14px}
+.set-row output{color:var(--gold);font-weight:800;font-variant-numeric:tabular-nums}
+.hint{font-size:12px;color:var(--muted);margin-top:3px}
+input[type=range]{width:100%;margin:10px 0 0;accent-color:var(--gold)}
+.switch{display:flex;justify-content:space-between;align-items:center;gap:12px;font-weight:650;font-size:14px}
+input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
+.set-row select{width:100%;margin-top:8px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:9px 10px;color:var(--text)}
+.sheet > .btn{width:100%;margin-top:8px}
+.about{margin-top:14px;font-size:12.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px}
+.about p{margin:0 0 8px}
+.about b{color:var(--text)}
+.alarm-sheet{text-align:center;border-color:rgba(255,107,107,.55);box-shadow:0 0 0 6px rgba(255,107,107,.12)}
+.alarm-ico{width:76px;height:76px;border-radius:24px;margin:6px auto 14px;display:grid;place-items:center;background:var(--red);color:#fff;animation:ring 1s ease-in-out infinite}
+.alarm-ico svg{width:38px;height:38px}
+.alarm-sheet h2{margin:0;font-size:24px}
+.alarm-sheet p{margin:8px 0 0;color:var(--muted);font-size:15px}
+.alarm-sheet p b{color:var(--text)}
+.alarm-sheet .btn{margin-top:18px;width:100%}
+@keyframes ring{0%,100%{transform:rotate(0)}15%{transform:rotate(-12deg)}30%{transform:rotate(10deg)}45%{transform:rotate(-6deg)}60%{transform:rotate(3deg)}}
+@media (prefers-reduced-motion:reduce){.status.go,.alarm-ico{animation:none}}
+
+/* bottom navigation */
+.nav{position:fixed;bottom:0;left:0;right:0;margin:0 auto;max-width:480px;height:calc(var(--nav-h) + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);display:grid;grid-template-columns:repeat(4,1fr);background:rgba(13,19,27,.94);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-top:1px solid var(--line);z-index:30}
+.nav button{border:0;background:none;color:var(--faint);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:11.5px;font-weight:700}
+.nav button svg{width:22px;height:22px}
+.nav button[aria-selected="true"]{color:var(--gold)}
+.toast{position:fixed;left:50%;bottom:calc(var(--nav-h) + 16px);transform:translate(-50%,16px);opacity:0;transition:opacity .2s,transform .2s;background:#eef3fa;color:#0a0e14;padding:10px 14px;border-radius:12px;font-size:13.5px;font-weight:650;z-index:60;max-width:min(420px,90vw);box-shadow:0 10px 30px rgba(0,0,0,.45);pointer-events:none;text-align:center}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+@media (max-width:359px){.clock-time small{display:none}.topbar{gap:8px}}
+@media print{.nav,.toast,.overlay,.icon-btn{display:none!important}body{background:#fff;color:#000}}
 </style>
 </head>
 <body>
-<header>
-  <h1><b>S5</b> Live <small>Montecasino ⇄ Sandton</small></h1>
-  <span id="status" class="pill"><i></i><span>Starting…</span></span>
-  <button class="iconbtn" id="openSettings" title="Feed settings" aria-label="Feed settings">⚙</button>
-</header>
+<div class="app">
+  <header class="topbar">
+    <div class="badge" aria-hidden="true">S5<i class="ldot" id="liveDot"></i></div>
+    <div class="brand">
+      <div class="brand-title">Bus Tracker</div>
+      <div class="brand-sub">Gautrain bus · Sandton ⇄ Montecasino</div>
+    </div>
+    <div class="clock" role="timer" aria-label="Time in South Africa" title="South African time (SAST)">
+      <div class="clock-time" id="clockTime">--:--</div>
+      <div class="clock-date" id="clockDate">&nbsp;</div>
+    </div>
+    <button class="icon-btn" id="alertsBtn" data-action="alerts" aria-label="Your alerts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span class="count" id="alertCount" hidden>0</span></button>
+    <button class="icon-btn" data-action="settings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+  </header>
 
-<div id="map"></div>
-
-<section class="sheet">
-  <div id="alarm" class="banner alarm" hidden></div>
-  <div id="feedMsg" class="banner err" hidden></div>
-
-  <div class="row">
-    <label class="small" for="stop">My stop</label>
-    <select id="stop">
-      <option value="sandton">Sandton Station</option>
-      <option value="monte">Montecasino</option>
-      <option value="custom">Pin on map (tap map to move)</option>
-    </select>
-    <button class="btn" id="locate" title="Put my stop where I am">📍 Here</button>
-  </div>
-  <div class="row">
-    <label class="small" for="lead">Alert me when a bus is</label>
-    <input type="number" id="lead" min="1" max="60" value="10"> <span class="muted">min away</span>
-    <button class="btn" id="alertsBtn">🔔 Turn on alerts</button>
+  <div class="seg" role="group" aria-label="Direction">
+    <button id="dir-toSandton" data-action="dir" data-dir="toSandton" aria-pressed="true">To Sandton</button>
+    <button id="dir-toMontecasino" data-action="dir" data-dir="toMontecasino" aria-pressed="false">To Montecasino</button>
   </div>
 
-  <div class="list" id="list"></div>
-  <p class="muted" id="foot" style="margin:10px 0 0"></p>
-</section>
+  <section class="trip" aria-label="Your trip">
+    <span class="pin" aria-hidden="true"></span>
+    <div>
+      <label class="field-label" for="boardSel">Board at</label>
+      <div class="sel-wrap"><select id="boardSel"></select><span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></span></div>
+    </div>
+    <span class="conn" aria-hidden="true"></span>
+    <div class="trip-caption" id="tripCaption"></div>
+    <span class="pin to" aria-hidden="true"></span>
+    <div>
+      <label class="field-label" for="alightSel">Get off at</label>
+      <div class="sel-wrap"><select id="alightSel"></select><span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></span></div>
+    </div>
+  </section>
 
-<dialog id="settings">
-  <form method="dialog" class="in">
-    <h2>Live feed</h2>
-    <p class="muted" style="margin:0">
-      Bus positions come from Gautrain's bus-location feed, through a small relay (Supabase project
-      gautrain-s5-live) because Gautrain's server doesn't let web pages read it directly.
-    </p>
-    <div class="f">
-      <label class="small" for="feedUrl">Feed or relay address</label>
-      <input type="url" id="feedUrl" spellcheck="false">
-    </div>
-    <div class="f">
-      <label class="small" for="feedKey">Relay key (optional; sent as Authorization: Bearer and apikey)</label>
-      <input type="text" id="feedKey" spellcheck="false" autocomplete="off">
-    </div>
-    <div class="row">
-      <label class="small" for="every">Refresh every</label>
-      <input type="number" id="every" min="5" max="120" value="10"> <span class="muted">s</span>
-      <label class="small"><input type="checkbox" id="showAll"> Show other routes</label>
-    </div>
-    <div class="f">
-      <span class="small">Last feed response (send me this if buses don't show)</span>
-      <pre class="raw" id="raw">Nothing received yet.</pre>
-    </div>
-    <div class="row">
-      <button class="btn" type="button" id="copyRaw">Copy response</button>
-      <button class="btn" type="button" id="resetFeed">Reset to default relay</button>
-      <button class="btn primary" value="save" style="margin-left:auto">Save</button>
-    </div>
-  </form>
-</dialog>
+  <main>
+    <section class="tab" id="tab-live" role="tabpanel" aria-labelledby="nav-live">
+      <div id="live"></div>
+      <div id="helpCard"></div>
+    </section>
+    <section class="tab" id="tab-route" role="tabpanel" aria-labelledby="nav-route" hidden>
+      <div id="routeHead"></div>
+      <div class="mapcard" id="mapCard">
+        <div id="routeMap" role="region" aria-label="Map of the S5 route with live bus positions"></div>
+        <div class="mapbtns">
+          <button data-action="map-fit" aria-label="Show the whole trip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+          <button data-action="map-mybus" aria-label="Centre on your bus"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="14" rx="3"/><path d="M4 10h16"/><path d="M7 21v-4M17 21v-4"/><path d="M8 13.5h.01M16 13.5h.01"/></svg></button>
+          <button data-action="map-size" aria-label="Make the map bigger" id="mapSizeBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg></button>
+        </div>
+      </div>
+      <div id="routeView"></div>
+    </section>
+    <section class="tab" id="tab-timetable" role="tabpanel" aria-labelledby="nav-timetable" hidden>
+      <div id="ttView"></div>
+    </section>
+    <section class="tab" id="tab-plan" role="tabpanel" aria-labelledby="nav-plan" hidden>
+      <div class="card">
+        <h3>Plan a trip</h3>
+        <p>Find the right bus on the weekday timetable — and when to leave.</p>
+        <div class="seg" role="group" aria-label="Plan by" style="margin-top:12px">
+          <button id="plan-arrive" data-action="plan-mode" data-mode="arrive" aria-pressed="true">Arrive by</button>
+          <button id="plan-depart" data-action="plan-mode" data-mode="depart" aria-pressed="false">Leave after</button>
+        </div>
+        <div class="plan-row"><label for="planTime"><span class="field-label" id="planTimeLabel">Arrive by</span></label><input type="time" id="planTime" value="08:00" step="60"></div>
+        <div id="planResult"></div>
+      </div>
+    </section>
+  </main>
+</div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<nav class="nav" role="tablist" aria-label="Sections">
+  <button id="nav-live" role="tab" aria-controls="tab-live" aria-selected="true" data-action="tab" data-tab="live"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14"/></svg><span>Live</span></button>
+  <button id="nav-route" role="tab" aria-controls="tab-route" aria-selected="false" data-action="tab" data-tab="route"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg><span>Route</span></button>
+  <button id="nav-timetable" role="tab" aria-controls="tab-timetable" aria-selected="false" data-action="tab" data-tab="timetable"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span>Timetable</span></button>
+  <button id="nav-plan" role="tab" aria-controls="tab-plan" aria-selected="false" data-action="tab" data-tab="plan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span>Plan</span></button>
+</nav>
+
+<div class="overlay" id="settingsSheet" aria-hidden="true">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="setTitle">
+    <div class="sheet-head"><h2 id="setTitle">Settings</h2><button class="icon-btn" data-action="close" aria-label="Close settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+    <div class="set-row"><div class="lbl"><label for="walk">Walk to your stop</label><output id="walkOut" for="walk">5 min</output></div><input type="range" id="walk" min="0" max="30" step="1" value="5"><div class="hint">Time from your door (or desk) to the bus stop.</div></div>
+    <div class="set-row"><div class="lbl"><label for="buffer">Be at the stop early by</label><output id="bufferOut" for="buffer">3 min</output></div><input type="range" id="buffer" min="0" max="10" step="1" value="3"><div class="hint">A few minutes' margin in case the bus comes early.</div></div>
+    <div class="set-row"><label class="lbl" for="lead">Ring the alert</label><select id="lead"><option value="0">When it's time to leave</option><option value="2">2 min before I need to leave</option><option value="5">5 min before I need to leave</option><option value="10">10 min before I need to leave</option></select></div>
+    <div class="set-row switch"><label for="sound">Alarm sound</label><input type="checkbox" id="sound" checked></div>
+    <div class="set-row switch"><label for="vibrate">Vibrate (on supported phones)</label><input type="checkbox" id="vibrate" checked></div>
+    <div class="set-row switch"><div><label for="liveOn">Live bus GPS</label><div class="hint" id="liveNote">Shows real bus positions and warns you if your bus is early or late.</div></div><input type="checkbox" id="liveOn" checked></div>
+    <div class="set-row switch"><div><label for="smartDir">Smart direction</label><div class="hint">Opens on “To Sandton” before noon and “To Montecasino” after noon.</div></div><input type="checkbox" id="smartDir" checked></div>
+    <button class="btn" data-action="test-alarm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span>Test the alert</span></button>
+    <div class="about">
+      <p><b>About the times.</b> All times are South African time (SAST), based on the published Gautrain S5 weekday timetable (Sandton Station ⇄ Montecasino via Bryanston).</p>
+      <p><b>About live GPS.</b> Bus positions come from Gautrain's bus-location feed every 10 seconds. The feed doesn't say which route a bus is on, so the app counts a bus as an S5 when it is driving along the S5 roads in the right direction, and pairs it with the timetable trip it is closest to. Arrival estimates assume the bus keeps to the timetable's pace from where it is now. If the bus is late, “leave by” still uses the scheduled time, so you never leave later than the timetable says. If it is early, “leave by” moves earlier. Route map © OpenStreetMap contributors.</p>
+      <p>Regular Gautrain buses don't run on weekends or public holidays. Traffic can delay buses; if yours is late, call the Gautrain bus information line on 010 223 1098.</p>
+      <p>Alerts ring while this app is open on your screen.</p>
+      <p id="persistNote"></p>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="alertsSheet" aria-hidden="true">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="alTitle">
+    <div class="sheet-head"><h2 id="alTitle">Your alerts</h2><button class="icon-btn" data-action="close" aria-label="Close alerts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+    <div id="alertsList"></div>
+  </div>
+</div>
+
+<div class="overlay" id="alarm" aria-hidden="true">
+  <div class="sheet alarm-sheet" role="alertdialog" aria-modal="true" aria-labelledby="alarmTitle" aria-describedby="alarmBody">
+    <div class="alarm-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></div>
+    <h2 id="alarmTitle">Time to leave!</h2>
+    <p id="alarmBody"></p>
+    <button class="btn primary" data-action="dismiss-alarm">I'm on my way</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="sr-only" id="liveStatus" aria-live="polite"></div>
+
 <script>
-"use strict";
+(function () {
+  'use strict';
 
-// ---------- config ----------
-const GAUTRAIN_FEED = "https://api.gautrain.co.za/transport-api/api/0/busses/location";
-// Gautrain's feed sends no CORS headers, so browsers read it through this relay (relay/gautrain-bus).
-const DEFAULT_FEED = "https://gkzuuwohldqbsnzmhdmx.supabase.co/functions/v1/gautrain-bus";
-// Public anon key of that Supabase project; it only lets the page call the relay.
-const DEFAULT_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdrenV1d29obGRxYnNuem1oZG14Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2OTA0MzcsImV4cCI6MjEwODI2NjQzN30.L5Ze3IO4dp6psKOC_KBCA7ScT5hj7J0ej9rLLsnOc8k";
-// Area requested from the feed: Fourways/Montecasino down to Sandton, with margin. The east edge
-// stops short of the bus depot near 28.12°E, where dozens of parked buses report all night.
-const BOX = { west: 27.94, south: -26.15, east: 28.10, north: -25.97 };
-// Stop pins are approximate; drag the pin or pick "Pin on map" to set your exact stop.
-const STOPS = {
-  sandton: { name: "Sandton Station", ll: [-26.1077, 28.0571] },
-  monte:   { name: "Montecasino",     ll: [-26.0249, 28.0118] },
-};
-const ROUTE_MATCH = /\bS\s*-?\s*5\b|monte\s*casino|montecasino/i;
-const ROAD_FACTOR = 1.35;      // straight-line → road distance
-const DEFAULT_KMH = 22;        // typical urban bus speed when the feed has none
-const STALE_MS = 3 * 60 * 1000;
-const REALERT_MS = 15 * 60 * 1000;
+  /* Gautrain S5 weekday timetable, Sandton Station <-> Montecasino.
+     starts  = departure time from the first stop (minutes after midnight)
+     offsets = minutes from the first stop to each stop (identical for every trip) */
+  const RAW = {"toMontecasino":{"stops":["Sandton Terminal","West St/Fredman Drv | Sandton (outbound)","West St/Grayston Drv | Sandton","Benmore Rd/Pam Rd | Sandton","Benmore Rd/Montagu Simpson Cres | Benmore Gardens","Outspan Rd/Benmore Rd | Sunset Acres","Ballymore Drv/Outspan Rd | Sunset Acres","Ballyclare Drv","Ballyclare Drv nr Coleraine Drv | Riverclub","Ballyoaks Office Park","Ballyclare Drv/William Nicol Drv | Country Life Park","William Nicol Drv/Ormonde St | Bryanston","Grosvenor Crossing shops","Nicolway Bryanston Mall","Parc Nicol (inbound)","Epsom Downs Mall","William Nicol Drv/Leslie Ave | Magaliessig (outbound)","Montecasino Terminal"],"offsets":[0,2,3,4,7,9,10,13,14,19,20,24,26,28,31,33,36,40],"starts":[368,378,388,398,408,418,428,438,448,458,468,478,488,498,508,518,528,538,548,568,588,608,628,648,668,688,708,728,748,768,788,808,828,848,868,888,908,918,928,938,948,958,968,978,988,998,1008,1018,1028,1038,1048,1058,1068,1078,1088,1098,1108,1118,1128,1138,1158,1178,1198,1218,1238]},"toSandton":{"stops":["Montecasino Terminal","William Nicol Drv/Monte Casino Blvd | Fourways","William Nicol Drv/Leslie Ave | Magaliessig (inbound)","Epsom Downs Mall","William Nicol Dr nr Sloane St | Epsom Downs","William Nicol Drv/Bryanston Drv | Bryanston (inbound)","Nicolway Bryanston Mall","William Nicol Drv/Grosvenor Rd | Bryanston","Ballyclare Drv/William Nicol Drv | Country Life Park","Ballyoaks Office Park","Ballyclare Drv nr Coleraine Drv | Riverclub","Ballyclare Drv","Ballymore Drv/Outspan Rd | Sunset Acres","Outspan Rd/Benmore Rd | Sunset Acres","Benmore Rd nr Waterstone Drv | Benmore Gardens","Benmore Rd/Pam Rd | Sandton","Fredman Drv/Sandown Valley Cres | Sandton","Public Transport Interchange"],"offsets":[0,1,3,6,7,9,10,13,18,20,24,25,28,29,32,34,36,40],"starts":[310,320,330,340,350,360,370,380,390,400,410,417,427,437,447,457,467,477,487,497,507,517,527,537,547,557,567,577,587,597,617,637,657,677,697,717,737,757,777,797,817,837,857,877,897,917,937,957,967,977,987,997,1007,1017,1027,1037,1047,1057,1067,1077,1087,1097,1107,1117,1127,1137,1147,1157,1167,1177,1187,1207,1227,1247,1267,1287]}};
+  const ICON_PATHS = {"bus":"<rect x=\"4\" y=\"3\" width=\"16\" height=\"14\" rx=\"3\"/><path d=\"M4 10h16\"/><path d=\"M7 21v-4M17 21v-4\"/><path d=\"M8 13.5h.01M16 13.5h.01\"/>","bell":"<path d=\"M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9\"/><path d=\"M13.73 21a2 2 0 0 1-3.46 0\"/>","gear":"<circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z\"/>","walk":"<circle cx=\"13\" cy=\"4\" r=\"2\"/><path d=\"M10 21l2-6 3 3v3\"/><path d=\"M7 12l3-4 4 1 2 4 3 1\"/><path d=\"M12 15l-1.5-6\"/>","alert":"<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 7v6\"/><path d=\"M12 17h.01\"/>","moon":"<path d=\"M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z\"/>","route":"<circle cx=\"6\" cy=\"19\" r=\"3\"/><path d=\"M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15\"/><circle cx=\"18\" cy=\"5\" r=\"3\"/>","live":"<circle cx=\"12\" cy=\"12\" r=\"2\"/><path d=\"M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14\"/>","list":"<path d=\"M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01\"/>","plan":"<rect x=\"3\" y=\"4\" width=\"18\" height=\"18\" rx=\"2\"/><path d=\"M16 2v4M8 2v4M3 10h18\"/>","phone":"<path d=\"M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z\"/>","info":"<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 16v-4\"/><path d=\"M12 8h.01\"/>","x":"<path d=\"M18 6L6 18M6 6l12 12\"/>","chev":"<path d=\"M6 9l6 6 6-6\"/>","pin":"<path d=\"M12 22s-7-6.13-7-12a7 7 0 0 1 14 0c0 5.87-7 12-7 12z\"/><circle cx=\"12\" cy=\"10\" r=\"2.5\"/>"};
 
-// ---------- storage (best effort) ----------
-const store = {
-  get(k, d) { try { const v = localStorage.getItem("s5live." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem("s5live." + k, JSON.stringify(v)); } catch {} },
-};
-const cfg = {
-  feedUrl: store.get("feedUrl", DEFAULT_FEED),
-  feedKey: store.get("feedKey", DEFAULT_KEY),
-  every: store.get("every", 10),
-  showAll: store.get("showAll", false),
-  stop: store.get("stop", new Date().getHours() < 12 ? "monte" : "sandton"),
-  custom: store.get("custom", null),
-  lead: store.get("lead", 10),
-};
-if (cfg.feedUrl === GAUTRAIN_FEED) { cfg.feedUrl = DEFAULT_FEED; cfg.feedKey = DEFAULT_KEY; }
+  const MIN = 60000, DAY = 86400000, SAST = 7200000; // South Africa: UTC+2, no daylight saving
+  const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const DOW_L = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const INFO_LINE = '010 223 1098', INFO_TEL = '+27102231098';
+  const TABS = ['live', 'route', 'timetable', 'plan'];
 
-// ---------- feed parsing ----------
-// The feed's format isn't documented, so find anything that looks like a vehicle with coordinates.
-const KEYS = {
-  lat: ["lat", "latitude", "y", "gpslat", "gps_lat"],
-  lon: ["lon", "lng", "long", "longitude", "x", "gpslon", "gpslng", "gps_lon", "gps_lng"],
-  id: ["id", "busid", "bus_id", "vehicleid", "vehicle_id", "vehicleno", "unitid", "unit_id", "registration",
-       "regno", "registrationnumber", "fleetno", "fleetnumber", "fleet_number", "busnumber", "bus_number", "name", "label", "code"],
-  route: ["route", "routename", "route_name", "routecode", "route_code", "routeid", "route_id", "routenumber",
-          "line", "linename", "service", "routedescription", "description", "trip", "tripname", "destination"],
-  heading: ["heading", "bearing", "direction", "course", "angle", "dir", "azimuth"],
-  speed: ["speed", "velocity", "kmh", "speedkmh", "speed_kmh"],
-  time: ["lastmodified", "timestamp", "time", "datetime", "lastupdate", "last_update", "lastupdated", "gpstime", "gps_time",
-         "date", "updated", "updatedat", "ts", "reporttime", "eventtime"],
-};
-const NESTED = ["position", "location", "coords", "coordinate", "coordinates", "gps", "point", "latlng", "geo"];
+  const pad = n => String(n).padStart(2, '0');
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const $ = id => document.getElementById(id);
+  const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+  const nStops = n => n + (n === 1 ? ' stop' : ' stops');
+  const toPhrase = dir => dir.label.replace(/^To /, 'to ');
+  const svg = name => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON_PATHS[name] + '</svg>';
+  const ICON = {};
+  Object.keys(ICON_PATHS).forEach(k => { ICON[k] = svg(k); });
 
-function pick(o, names) {
-  for (const k of Object.keys(o)) if (names.includes(k.toLowerCase())) return o[k];
-  return undefined;
-}
-const num = v => (v === null || v === undefined || v === "" ? NaN : Number(v));
-const inSA = (lat, lon) => lat < -21 && lat > -35.5 && lon > 15 && lon < 33.5;
-
-function coordsOf(o) {
-  if (!o || typeof o !== "object") return null;
-  if (Array.isArray(o)) {
-    if (o.length >= 2 && typeof o[0] !== "object") {
-      const a = num(o[0]), b = num(o[1]);
-      if (inSA(b, a)) return [b, a];          // [lon, lat] (GeoJSON order)
-      if (inSA(a, b)) return [a, b];
-    }
-    return null;
-  }
-  if (o.geometry && o.geometry.coordinates) return coordsOf(o.geometry.coordinates);
-  const lat = num(pick(o, KEYS.lat)), lon = num(pick(o, KEYS.lon));
-  if (inSA(lat, lon)) return [lat, lon];
-  if (inSA(lon, lat)) return [lon, lat];      // swapped fields
-  return null;
-}
-
-function parseTime(v) {
-  if (v === undefined || v === null || v === "") return null;
-  if (typeof v === "number" || /^\d+$/.test(String(v))) {
-    const n = Number(v);
-    return n < 1e12 ? n * 1000 : n;
-  }
-  const s = String(v);
-  // Times without a zone are South African time (UTC+2).
-  const t = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : s.replace(" ", "T") + "+02:00");
-  return isNaN(t) ? null : t;
-}
-
-function toVehicle(o, ll) {
-  const props = o.properties && typeof o.properties === "object" ? { ...o, ...o.properties } : o;
-  const idRaw = pick(props, KEYS.id);
-  const routeRaw = pick(props, KEYS.route);
-  const route = routeRaw == null || typeof routeRaw === "object" ? "" : String(routeRaw);
-  const text = Object.values(props).filter(v => typeof v === "string" || typeof v === "number").join(" ");
-  const heading = num(pick(props, KEYS.heading));
-  const speed = num(pick(props, KEYS.speed));
-  return {
-    id: idRaw == null || typeof idRaw === "object" ? null : String(idRaw),
-    route, text, ll,
-    heading: isFinite(heading) ? heading : null,
-    speed: isFinite(speed) ? speed : null,
-    time: parseTime(pick(props, KEYS.time)),
+  /* ---------- Route data ---------- */
+  const DIRS = {
+    toSandton: Object.assign({ id: 'toSandton', label: 'To Sandton' }, RAW.toSandton),
+    toMontecasino: Object.assign({ id: 'toMontecasino', label: 'To Montecasino' }, RAW.toMontecasino)
   };
-}
-
-function extractVehicles(data) {
-  const out = [];
-  (function walk(node, depth) {
-    if (!node || typeof node !== "object" || depth > 8) return;
-    if (Array.isArray(node)) { node.forEach(n => walk(n, depth + 1)); return; }
-    let ll = coordsOf(node);
-    if (!ll) for (const k of Object.keys(node)) {
-      if (NESTED.includes(k.toLowerCase()) && (ll = coordsOf(node[k]))) break;
-    }
-    if (ll) { out.push(toVehicle(node, ll)); return; }
-    for (const v of Object.values(node)) walk(v, depth + 1);
-  })(data, 0);
-  return out;
-}
-
-// ---------- geo ----------
-function distKm(a, b) {
-  const R = 6371, r = Math.PI / 180;
-  const dLat = (b[0] - a[0]) * r, dLon = (b[1] - a[1]) * r;
-  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(s));
-}
-function bearing(a, b) {
-  const r = Math.PI / 180;
-  const y = Math.sin((b[1] - a[1]) * r) * Math.cos(b[0] * r);
-  const x = Math.cos(a[0] * r) * Math.sin(b[0] * r) - Math.sin(a[0] * r) * Math.cos(b[0] * r) * Math.cos((b[1] - a[1]) * r);
-  return (Math.atan2(y, x) / r + 360) % 360;
-}
-
-// ---------- map ----------
-const map = L.map("map", { zoomControl: false, attributionControl: true }).fitBounds([STOPS.sandton.ll, STOPS.monte.ll], { padding: [40, 40] });
-L.control.zoom({ position: "topright" }).addTo(map);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 19, subdomains: "abc", attribution: "© OpenStreetMap contributors",
-}).addTo(map);
-for (const s of Object.values(STOPS)) {
-  L.circleMarker(s.ll, { radius: 6, color: "#b8860b", weight: 3, fillColor: "#fff", fillOpacity: 1 })
-    .bindTooltip(s.name, { permanent: true, direction: "right", offset: [8, 0] }).addTo(map);
-}
-
-const meMarker = L.marker([0, 0], {
-  draggable: true, zIndexOffset: 1000,
-  icon: L.divIcon({ className: "", html: '<div class="meicon"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }),
-}).bindTooltip("My stop", { direction: "top", offset: [0, -12] }).addTo(map);
-const leadCircle = L.circle([0, 0], { radius: 1, color: "#1d4ed8", weight: 1, dashArray: "4 6", fill: false, interactive: false }).addTo(map);
-
-function myStop() {
-  if (cfg.stop === "custom" && cfg.custom) return cfg.custom;
-  return (STOPS[cfg.stop] || STOPS.sandton).ll;
-}
-function placeMe() {
-  const ll = myStop();
-  meMarker.setLatLng(ll);
-  // Rough reach of a bus in the alert window, for orientation only.
-  leadCircle.setLatLng(ll).setRadius(Math.min(15000, (cfg.lead / 60) * DEFAULT_KMH / ROAD_FACTOR * 1000));
-}
-function setCustom(ll) {
-  cfg.custom = [+ll[0].toFixed(6), +ll[1].toFixed(6)];
-  cfg.stop = "custom";
-  store.set("custom", cfg.custom); store.set("stop", "custom");
-  $("stop").value = "custom";
-  placeMe(); render();
-}
-meMarker.on("dragend", e => { const p = e.target.getLatLng(); setCustom([p.lat, p.lng]); });
-map.on("click", e => { if (cfg.stop === "custom") setCustom([e.latlng.lat, e.latlng.lng]); });
-
-// Keep both stops and my pin in view as the bottom sheet grows or shrinks, until the user moves the map.
-let autoFit = true;
-const stopAutoFit = () => { autoFit = false; };
-function fitStops() { map.fitBounds([STOPS.sandton.ll, STOPS.monte.ll, myStop()], { padding: [40, 40] }); }
-map.on("dragstart dblclick", stopAutoFit);
-map.getContainer().addEventListener("wheel", stopAutoFit, { passive: true });
-map.getContainer().addEventListener("touchstart", e => { if (e.touches.length > 1) stopAutoFit(); }, { passive: true });
-document.querySelector(".leaflet-control-zoom").addEventListener("click", stopAutoFit);
-new ResizeObserver(() => { map.invalidateSize(); if (autoFit) fitStops(); }).observe(map.getContainer());
-
-// ---------- live state ----------
-const buses = new Map();      // key → bus state
-let lastOk = 0, lastErr = null, routeInfoSeen = false, fetching = false, pollTimer = null;
-let watchKey = store.get("watch", null);
-
-function busIcon(b) {
-  const cls = ["busicon", b.match ? "" : "other", b.stale ? "stale" : "", b.key === watchKey ? "watch" : ""].join(" ");
-  const label = b.match ? "S5" : (b.route || "bus").slice(0, 4);
-  const arrow = b.heading == null ? "" : `<div class="arrow" style="transform:rotate(${b.heading}deg)"></div>`;
-  return L.divIcon({ className: "", html: `<div class="${cls}">${arrow}<div class="dot">${esc(label)}</div></div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
-}
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
-function animate(b, to, ms) {
-  const from = b.marker.getLatLng();
-  const start = performance.now();
-  cancelAnimationFrame(b.anim);
-  const step = t => {
-    const k = Math.min(1, (t - start) / ms);
-    const e = k < .5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
-    b.marker.setLatLng([from.lat + (to[0] - from.lat) * e, from.lng + (to[1] - from.lng) * e]);
-    if (k < 1) b.anim = requestAnimationFrame(step);
+  const lastIdx = dir => dir.stops.length - 1;
+  const STOP_NAMES = {
+    'Sandton Terminal': ['Sandton Station', 'Sandton Terminal'],
+    'Public Transport Interchange': ['Sandton Station', 'Public Transport Interchange'],
+    'Montecasino Terminal': ['Montecasino Terminal', 'Fourways']
   };
-  b.anim = requestAnimationFrame(step);
-}
+  function stopParts(raw) {
+    if (STOP_NAMES[raw]) return { title: STOP_NAMES[raw][0], area: STOP_NAMES[raw][1] };
+    const i = raw.indexOf(' | ');
+    return i > 0 ? { title: raw.slice(0, i), area: raw.slice(i + 3) } : { title: raw, area: '' };
+  }
+  const stopTitle = raw => stopParts(raw).title;
+  const optLabel = raw => { const p = stopParts(raw); return p.area ? p.title + ' · ' + p.area : p.title; };
 
-function ingest(vehicles) {
-  const now = Date.now();
-  routeInfoSeen = vehicles.some(v => v.route);
-  const seen = new Set();
-  const unkeyed = [];
-  for (const v of vehicles) {
-    if (v.id) { upsert("id:" + v.id, v, now); seen.add("id:" + v.id); }
-    else unkeyed.push(v);
+  /* ---------- Time (always South African time) ---------- */
+  function dayStartMs(ms) { const d = new Date(ms + SAST); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - SAST; }
+  function hhmm(min) { const m = ((Math.round(min) % 1440) + 1440) % 1440; return pad(Math.floor(m / 60)) + ':' + pad(m % 60); }
+  const hhmmMs = ms => hhmm((ms - dayStartMs(ms)) / MIN);
+  function fmtDur(ms) {
+    if (ms <= 0) return 'now';
+    const s = Math.ceil(ms / 1000), m = Math.floor(s / 60), sec = s % 60;
+    if (m === 0) return sec + 's';
+    if (m < 10) return m + 'm ' + pad(sec) + 's';
+    if (m < 60) return m + ' min';
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + 'h ' + pad(m % 60) + 'm';
+    return Math.floor(h / 24) + 'd ' + (h % 24) + 'h';
   }
-  // No ids in the feed: follow each bus by matching it to the nearest bus from the last update.
-  const free = [...buses.values()].filter(b => b.key.startsWith("n:") && !seen.has(b.key));
-  for (const v of unkeyed) {
-    let best = null, bestD = 0.8;
-    for (const b of free) { const d = distKm(b.ll, v.ll); if (d < bestD) { best = b; bestD = d; } }
-    const key = best ? best.key : "n:" + Math.random().toString(36).slice(2, 8);
-    if (best) free.splice(free.indexOf(best), 1);
-    upsert(key, v, now); seen.add(key);
-  }
-  for (const [k, b] of buses) {
-    if (!seen.has(k)) { b.marker.remove(); b.trail.remove(); buses.delete(k); }
-  }
-}
+  function parseHHMM(s) { const mm = /^(\d{1,2}):(\d{2})/.exec(s || ''); if (!mm) return null; const h = +mm[1], m = +mm[2]; return h < 24 && m < 60 ? h * 60 + m : null; }
 
-function upsert(key, v, now) {
-  let b = buses.get(key);
-  const match = ROUTE_MATCH.test(v.route) || ROUTE_MATCH.test(v.text);
-  if (!b) {
-    b = { key, hist: [], alerted: 0 };
-    b.marker = L.marker(v.ll, { zIndexOffset: 500 }).on("click", () => toggleWatch(key));
-    b.trail = L.polyline([], { color: "#c8102e", weight: 3, opacity: .45, interactive: false });
-    buses.set(key, b);
+  /* ---------- South African public holidays (no regular bus service) ---------- */
+  const FIXED_HOLIDAYS = [[0, 1, "New Year's Day"], [2, 21, 'Human Rights Day'], [3, 27, 'Freedom Day'], [4, 1, "Workers' Day"], [5, 16, 'Youth Day'], [7, 9, "National Women's Day"], [8, 24, 'Heritage Day'], [11, 16, 'Day of Reconciliation'], [11, 25, 'Christmas Day'], [11, 26, 'Day of Goodwill']];
+  const holidayCache = {};
+  function ymd(utcMidnight) { const d = new Date(utcMidnight); return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()); }
+  function easter(y) {
+    const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+    const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+    return Date.UTC(y, Math.floor((h + l - 7 * m + 114) / 31) - 1, ((h + l - 7 * m + 114) % 31) + 1);
   }
-  const moved = !b.ll || distKm(b.ll, v.ll) > 0.005;
-  Object.assign(b, { id: v.id, route: v.route, match, fix: v.time || now });
-  b.stale = now - b.fix > STALE_MS;
-  if (moved || !b.hist.length) { b.hist.push({ ll: v.ll, t: v.time || now }); b.movedAt = now; }
-  if (b.hist.length > 12) b.hist.shift();
-  const prev = b.hist.length > 1 ? b.hist[b.hist.length - 2] : null;
-  b.heading = v.heading != null ? v.heading : prev && moved ? bearing(prev.ll, v.ll) : b.heading ?? null;
-  // Speed: from the feed if given, otherwise measured between fixes.
-  let kmh = v.speed;
-  if (kmh == null && prev) {
-    const h = (b.hist[b.hist.length - 1].t - prev.t) / 3.6e6;
-    if (h > 0) kmh = distKm(prev.ll, v.ll) / h;
+  function holidays(y) {
+    if (holidayCache[y]) return holidayCache[y];
+    const map = {}, e = easter(y);
+    map[ymd(e - 2 * DAY)] = 'Good Friday';
+    map[ymd(e + DAY)] = 'Family Day';
+    const fixed = FIXED_HOLIDAYS.map(x => [Date.UTC(y, x[0], x[1]), x[2]]);
+    fixed.forEach(x => { map[ymd(x[0])] = x[1]; });
+    fixed.forEach(x => { // a public holiday on a Sunday moves to the next free day
+      if (new Date(x[0]).getUTCDay() !== 0) return;
+      let t = x[0] + DAY;
+      while (map[ymd(t)]) t += DAY;
+      map[ymd(t)] = x[1] + ' (observed)';
+    });
+    holidayCache[y] = map;
+    return map;
   }
-  b.kmh = kmh;
-  if (b.ll) animate(b, v.ll, Math.min(cfg.every * 1000 * .9, 8000)); else b.marker.setLatLng(v.ll);
-  b.ll = v.ll;
-  b.trail.setLatLngs(b.hist.map(h => h.ll));
-  b.marker.setIcon(busIcon(b));
-}
+  function dayInfo(ds) {
+    const d = new Date(ds + SAST), y = d.getUTCFullYear(), mo = d.getUTCMonth(), dd = d.getUTCDate(), dow = d.getUTCDay();
+    const key = y + '-' + pad(mo + 1) + '-' + pad(dd), hol = holidays(y)[key] || null;
+    return { start: ds, dow, key, hol, service: dow >= 1 && dow <= 5 && !hol, short: DOW[dow] + ' ' + dd + ' ' + MON[mo], long: DOW_L[dow] + ' ' + dd + ' ' + MON[mo] };
+  }
+  function nextServiceDay(ds) { let x = ds + DAY; for (let k = 0; k < 21; k++, x += DAY) { const di = dayInfo(x); if (di.service) return di; } return dayInfo(ds + DAY); }
+  function relDay(day, today) {
+    const diff = Math.round((day.start - today.start) / DAY);
+    if (diff === 0) return 'today';
+    if (diff === 1) return 'tomorrow (' + day.short + ')';
+    return day.long;
+  }
 
-// Distance/ETA to my stop, and whether the bus is getting closer.
-function assess(b) {
-  const me = myStop();
-  const d = distKm(b.ll, me);
-  let trend = 0;
-  if (b.hist.length > 1) {
-    const old = b.hist[Math.max(0, b.hist.length - 4)];
-    trend = distKm(old.ll, me) - d;  // > 0 means closer than a few fixes ago
+  /* ---------- Settings & state ---------- */
+  const store = (() => {
+    const mem = {}; let ls = null;
+    try { ls = window.localStorage; ls.setItem('__s5_probe', '1'); ls.removeItem('__s5_probe'); } catch (e) { ls = null; }
+    return {
+      persistent: !!ls,
+      get(k, d) { try { if (ls) { const v = ls.getItem(k); if (v != null) return JSON.parse(v); } } catch (e) { /* fall back to memory */ } return k in mem ? mem[k] : d; },
+      set(k, v) { mem[k] = v; try { if (ls) ls.setItem(k, JSON.stringify(v)); } catch (e) { /* memory only */ } }
+    };
+  })();
+  const clampInt = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) && n >= lo && n <= hi ? n : d; };
+  const saved = store.get('s5.settings', null) || {};
+  const state = {
+    dirId: 'toSandton',
+    board: { toSandton: 0, toMontecasino: 0 },
+    alight: { toSandton: lastIdx(DIRS.toSandton), toMontecasino: lastIdx(DIRS.toMontecasino) },
+    walk: clampInt(saved.walk, 0, 30, 5),
+    buffer: clampInt(saved.buffer, 0, 10, 3),
+    lead: [0, 2, 5, 10].indexOf(Number(saved.lead)) >= 0 ? Number(saved.lead) : 2,
+    sound: saved.sound !== false,
+    vibrate: saved.vibrate !== false,
+    smartDir: saved.smartDir !== false,
+    live: saved.live !== false,
+    delay: 0,
+    tab: 'live',
+    planMode: 'arrive',
+    planTime: '08:00',
+    alerts: []
+  };
+  Object.keys(DIRS).forEach(id => {
+    const n = DIRS[id].stops.length;
+    const b = clampInt(saved.board && saved.board[id], 0, n - 2, 0), a = clampInt(saved.alight && saved.alight[id], 1, n - 1, n - 1);
+    if (b < a) { state.board[id] = b; state.alight[id] = a; }
+  });
+  (function initialDirection() {
+    const now = Date.now(), afternoon = (now - dayStartMs(now)) / MIN >= 720;
+    if (state.smartDir || !DIRS[saved.dirId]) state.dirId = afternoon ? 'toMontecasino' : 'toSandton';
+    else state.dirId = saved.dirId;
+    if (state.dirId === 'toMontecasino') { state.planMode = 'depart'; state.planTime = '17:00'; }
+  })();
+  function persist() {
+    store.set('s5.settings', { dirId: state.dirId, board: state.board, alight: state.alight, walk: state.walk, buffer: state.buffer, lead: state.lead, sound: state.sound, vibrate: state.vibrate, smartDir: state.smartDir, live: state.live });
   }
-  const kmh = b.kmh != null && b.kmh > 8 ? Math.min(b.kmh, 60) : DEFAULT_KMH;
-  const eta = (d * ROAD_FACTOR / kmh) * 60;
-  return { d, eta, approaching: trend > 0.03, leaving: trend < -0.03, here: d < 0.15 };
-}
 
-function visible(b) { return cfg.showAll || !routeInfoSeen || b.match; }
-
-// ---------- alerts ----------
-let audio = null, alertsOn = false, wakeLock = null;   // sound needs a fresh tap after each reload
-
-async function enableAlerts() {
-  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); await audio.resume(); } catch {}
-  if ("Notification" in window && Notification.permission === "default") {
-    try { await Notification.requestPermission(); } catch {}
+  /* ---------- Route geometry ----------
+     The S5 loop (Sandton Station → Montecasino → Sandton Station) from OpenStreetMap route relation 3281475,
+     simplified to about 3 m, and the 34 stops OpenStreetMap records along it, in loop order. */
+  const LOOP = '-26.10807,28.05673;-26.10843,28.05707;-26.10782,28.05798;-26.10525,28.05479;-26.10368,28.05298;-26.10224,28.05118;-26.10200,28.05096;-26.10177,28.05083;-26.10049,28.05029;-26.09998,28.05015;-26.09977,28.05015;-26.09494,28.05186;-26.09116,28.04995;-26.08944,28.04817;-26.08697,28.04636;-26.08664,28.04727;-26.08451,28.05129;-26.08408,28.05121;-26.08341,28.05099;-26.07864,28.04889;-26.07678,28.04790;-26.07649,28.04769;-26.07618,28.04732;-26.07476,28.04478;-26.07428,28.04360;-26.07393,28.04253;-26.07374,28.04151;-26.07369,28.04091;-26.07363,28.03859;-26.07324,28.03754;-26.07328,28.03741;-26.07354,28.03703;-26.07386,28.03584;-26.07519,28.03022;-26.07583,28.02772;-26.07587,28.02725;-26.07569,28.02630;-26.07453,28.02657;-26.07369,28.02665;-26.07275,28.02663;-26.07185,28.02649;-26.06470,28.02448;-26.06286,28.02409;-26.05994,28.02335;-26.05441,28.02176;-26.05337,28.02142;-26.05158,28.02113;-26.04922,28.02085;-26.04786,28.02046;-26.04728,28.02021;-26.04657,28.01983;-26.04556,28.01906;-26.04493,28.01841;-26.04228,28.01529;-26.04176,28.01487;-26.03584,28.01119;-26.03382,28.01021;-26.03277,28.00985;-26.03210,28.00966;-26.03135,28.00957;-26.02884,28.00950;-26.02768,28.00939;-26.02673,28.00924;-26.02622,28.01115;-26.02606,28.01142;-26.02590,28.01152;-26.02541,28.01144;-26.02481,28.01150;-26.02468,28.01143;-26.02460,28.01147;-26.02458,28.01164;-26.02467,28.01172;-26.02475,28.01170;-26.02482,28.01161;-26.02541,28.01155;-26.02573,28.01160;-26.02602,28.01172;-26.02613,28.01185;-26.02624,28.01184;-26.02630,28.01176;-26.02633,28.01135;-26.02666,28.01011;-26.02683,28.00975;-26.02697,28.00964;-26.02711,28.00960;-26.02750,28.00958;-26.02958,28.00975;-26.03128,28.00979;-26.03210,28.00989;-26.03321,28.01018;-26.03457,28.01076;-26.03577,28.01138;-26.03680,28.01198;-26.03987,28.01394;-26.04192,28.01518;-26.04289,28.01622;-26.04473,28.01840;-26.04554,28.01921;-26.04586,28.01950;-26.04667,28.02005;-26.04737,28.02042;-26.04797,28.02067;-26.04867,28.02090;-26.04943,28.02105;-26.05264,28.02144;-26.05336,28.02160;-26.05508,28.02210;-26.05709,28.02284;-26.06104,28.02378;-26.06505,28.02480;-26.06785,28.02561;-26.07163,28.02663;-26.07255,28.02676;-26.07325,28.02679;-26.07429,28.02674;-26.07542,28.02652;-26.07558,28.02659;-26.07568,28.02669;-26.07576,28.02702;-26.07577,28.02760;-26.07399,28.03500;-26.07358,28.03690;-26.07349,28.03716;-26.07328,28.03741;-26.07324,28.03754;-26.07363,28.03859;-26.07369,28.04091;-26.07374,28.04151;-26.07393,28.04253;-26.07448,28.04410;-26.07542,28.04610;-26.07622,28.04739;-26.07649,28.04769;-26.07678,28.04790;-26.07864,28.04889;-26.08341,28.05099;-26.08408,28.05121;-26.08451,28.05129;-26.08664,28.04727;-26.08697,28.04636;-26.08944,28.04817;-26.09116,28.04995;-26.09457,28.05169;-26.09486,28.05192;-26.09487,28.05200;-26.09492,28.05205;-26.09502,28.05201;-26.09503,28.05192;-26.09916,28.05043;-26.09967,28.05027;-26.09991,28.05026;-26.10084,28.05057;-26.10187,28.05105;-26.10211,28.05128;-26.10316,28.05255;-26.10350,28.05177;-26.10371,28.05142;-26.10394,28.05119;-26.10560,28.05008;-26.10585,28.05005;-26.10599,28.05016;-26.10905,28.05615;-26.10847,28.05699;-26.10809,28.05665;-26.10749,28.05659;-26.10748,28.05669;-26.10807,28.05673'.split(';').map(p => p.split(',').map(Number));
+  const OSM_STOPS = [[-26.10801, 28.05673], [-26.10164, 28.05065], [-26.09993, 28.05007], [-26.09358, 28.05111], [-26.08678, 28.04687], [-26.08313, 28.05082], [-26.07751, 28.04825], [-26.07434, 28.04354], [-26.07485, 28.03183], [-26.07593, 28.02761], [-26.06452, 28.02435], [-26.05981, 28.02325], [-26.05277, 28.02123], [-26.04462, 28.01795], [-26.04170, 28.01471], [-26.03211, 28.00959], [-26.02466, 28.01140], [-26.02812, 28.00976], [-26.03344, 28.01036], [-26.04180, 28.01523], [-26.04333, 28.01685], [-26.04836, 28.02091], [-26.05208, 28.02147], [-26.06132, 28.02396], [-26.07567, 28.02689], [-26.07484, 28.03138], [-26.07484, 28.04510], [-26.07768, 28.04851], [-26.08303, 28.05091], [-26.08806, 28.04722], [-26.09342, 28.05127], [-26.09996, 28.05034], [-26.10432, 28.05095], [-26.10801, 28.05673]];
+  const MONTE = 16; // index of Montecasino Terminal in OSM_STOPS
+  // Timetable stop → OSM stop index. null: no matching OSM stop, so it is placed between its neighbours by timetable minutes.
+  const ANCHORS = {
+    toMontecasino: [0, null, 1, 2, 3, 4, null, null, 6, null, 9, 10, 11, 12, 13, 14, 15, 16],
+    toSandton: [16, 17, 18, 19, 20, 21, 22, 23, 24, null, 27, null, null, 29, null, 31, 32, 33]
+  };
+  const KX = 111320 * Math.cos(-26.07 * Math.PI / 180), KY = 110574; // metres per degree here
+  const xy = ll => [ll[1] * KX, ll[0] * KY];
+  const distM = (a, b) => { const p = xy(a), q = xy(b); return Math.hypot(p[0] - q[0], p[1] - q[1]); };
+  const bearingDeg = (a, b) => { const p = xy(a), q = xy(b); return (Math.atan2(q[0] - p[0], q[1] - p[1]) * 180 / Math.PI + 360) % 360; };
+  const LXY = LOOP.map(xy), LCUM = [0];
+  for (let k = 1; k < LXY.length; k++) LCUM.push(LCUM[k - 1] + Math.hypot(LXY[k][0] - LXY[k - 1][0], LXY[k][1] - LXY[k - 1][1]));
+  const LOOP_M = LCUM[LCUM.length - 1];
+  // Nearest point on the loop between along-distances lo and hi. A heading more than 100° off the road's direction rules a segment out.
+  function snap(ll, lo, hi, heading) {
+    const p = xy(ll);
+    let best = null;
+    for (let k = 0; k < LXY.length - 1; k++) {
+      if (LCUM[k + 1] < lo || LCUM[k] > hi) continue;
+      const a = LXY[k], b = LXY[k + 1], dx = b[0] - a[0], dy = b[1] - a[1], len2 = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2));
+      const dist = Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+      let score = dist;
+      if (heading != null) {
+        const diff = Math.abs((((heading - Math.atan2(dx, dy) * 180 / Math.PI) % 360) + 540) % 360 - 180);
+        score += diff > 100 ? 1e4 : diff * 0.4;
+      }
+      if (!best || score < best.score) best = { d: LCUM[k] + t * Math.sqrt(len2), dist, score };
+    }
+    return best;
   }
-  try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch {}
-  alertsOn = true; beep(1); syncAlertBtn();
-}
-function disableAlerts() {
-  alertsOn = false;
-  try { wakeLock && wakeLock.release(); } catch {}
-  wakeLock = null; syncAlertBtn();
-}
-document.addEventListener("visibilitychange", async () => {
-  if (alertsOn && document.visibilityState === "visible" && "wakeLock" in navigator) {
-    try { wakeLock = await navigator.wakeLock.request("screen"); } catch {}
+  function pointAt(d) {
+    let k = 0;
+    while (k < LCUM.length - 2 && LCUM[k + 1] < d) k++;
+    const f = Math.max(0, Math.min(1, (d - LCUM[k]) / ((LCUM[k + 1] - LCUM[k]) || 1)));
+    return [LOOP[k][0] + f * (LOOP[k + 1][0] - LOOP[k][0]), LOOP[k][1] + f * (LOOP[k + 1][1] - LOOP[k][1])];
   }
-});
-function syncAlertBtn() {
-  const btn = $("alertsBtn");
-  btn.textContent = alertsOn ? "🔔 Alerts on" : "🔔 Turn on alerts";
-  btn.classList.toggle("on", alertsOn);
-}
-function beep(times = 3) {
-  if (!audio) return;
-  const t0 = audio.currentTime;
-  for (let i = 0; i < times; i++) {
-    const o = audio.createOscillator(), g = audio.createGain();
-    o.frequency.value = i % 2 ? 660 : 880; o.type = "sine";
-    g.gain.setValueAtTime(0.0001, t0 + i * 0.35);
-    g.gain.exponentialRampToValueAtTime(0.5, t0 + i * 0.35 + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.35 + 0.28);
-    o.connect(g).connect(audio.destination); o.start(t0 + i * 0.35); o.stop(t0 + i * 0.35 + 0.3);
+  function sliceLoop(d0, d1) {
+    const out = [pointAt(d0)];
+    for (let k = 0; k < LCUM.length; k++) if (LCUM[k] > d0 && LCUM[k] < d1) out.push(LOOP[k]);
+    out.push(pointAt(d1));
+    return out;
   }
-}
-function fire(b, a) {
-  const what = b.match ? "S5 bus" : "Bus" + (b.route ? " " + b.route : "");
-  const msg = a.here ? `${what} is at your stop now` : `${what} about ${Math.max(1, Math.round(a.eta))} min from your stop (${a.d.toFixed(1)} km)`;
-  const el = $("alarm");
-  el.textContent = "🚌 " + msg; el.hidden = false;
-  clearTimeout(fire.t); fire.t = setTimeout(() => (el.hidden = true), 60000);
-  beep(4);
-  try { navigator.vibrate && navigator.vibrate([400, 150, 400, 150, 400]); } catch {}
-  try {
-    if ("Notification" in window && Notification.permission === "granted")
-      new Notification("S5 Live", { body: msg, tag: "s5-" + b.key, renotify: true });
-  } catch {}
-}
-function checkAlerts(list) {
-  if (!alertsOn) return;
-  const now = Date.now();
-  for (const { b, a } of list) {
-    if (b.stale || a.leaving) continue;
-    const watched = b.key === watchKey;
-    if (!watched && (watchKey && buses.has(watchKey))) continue;   // only the watched bus while one is chosen
-    const due = (a.approaching || a.here) && (a.eta <= cfg.lead || a.here);
-    if (due && now - b.alerted > REALERT_MS) { b.alerted = now; fire(b, a); }
+  const OSM_D = [];
+  OSM_STOPS.forEach((ll, k) => {
+    const lo = k ? OSM_D[k - 1] : 0;
+    OSM_D.push(k === 0 ? 0 : k === OSM_STOPS.length - 1 ? LOOP_M : snap(ll, lo, lo + 4000, null).d);
+  });
+  const DIR_RANGE = { toMontecasino: [0, OSM_D[MONTE]], toSandton: [OSM_D[MONTE], LOOP_M] };
+  Object.keys(DIRS).forEach(id => {
+    const dir = DIRS[id], d = ANCHORS[id].map(x => (x == null ? null : OSM_D[x]));
+    for (let k = 0; k < d.length; k++) {
+      if (d[k] != null) continue;
+      let p = k - 1, n = k + 1;
+      while (d[n] == null) n++;
+      d[k] = d[p] + (d[n] - d[p]) * (dir.offsets[k] - dir.offsets[p]) / (dir.offsets[n] - dir.offsets[p]);
+    }
+    dir.along = d;
+  });
+  // Fractional stop index and timetable minutes from the first stop, for a point d metres along the loop.
+  function posFromAlong(dir, d) {
+    const A = dir.along, last = A.length - 1;
+    if (d <= A[0]) return { pos: 0, off: 0 };
+    for (let k = 0; k < last; k++) {
+      if (d < A[k + 1]) { const f = (d - A[k]) / (A[k + 1] - A[k]); return { pos: k + f, off: dir.offsets[k] + f * (dir.offsets[k + 1] - dir.offsets[k]) }; }
+    }
+    return { pos: last, off: dir.offsets[last] };
   }
-}
-function toggleWatch(key) {
-  watchKey = watchKey === key ? null : key;
-  store.set("watch", watchKey);
-  for (const b of buses.values()) b.marker.setIcon(busIcon(b));
-  if (watchKey && !alertsOn) enableAlerts();
-  render();
-}
 
-// ---------- list + status ----------
-function render() {
-  const rows = [...buses.values()].filter(visible).map(b => ({ b, a: assess(b) }));
-  rows.sort((x, y) => (y.a.approaching - x.a.approaching) || (x.a.eta - y.a.eta));
-  for (const b of buses.values()) {
-    const show = visible(b);
-    if (show && !map.hasLayer(b.marker)) { b.marker.addTo(map); b.trail.addTo(map); }
-    if (!show && map.hasLayer(b.marker)) { b.marker.remove(); b.trail.remove(); }
+  /* ---------- Live GPS ---------- */
+  // Gautrain's bus-location feed, read through a small relay that adds the headers browsers need (Supabase Edge Function "gautrain-bus").
+  const FEED_URL = 'https://gkzuuwohldqbsnzmhdmx.supabase.co/functions/v1/gautrain-bus';
+  // Public anon key of that Supabase project; it only lets the page call the relay.
+  const FEED_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdrenV1d29obGRxYnNuem1oZG14Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2OTA0MzcsImV4cCI6MjEwODI2NjQzN30.L5Ze3IO4dp6psKOC_KBCA7ScT5hj7J0ej9rLLsnOc8k';
+  // Fourways down to Sandton. The east edge leaves out the depot near 28.12°E, where parked buses report all night.
+  const FEED_BOX = { east: '28.1', south: '-26.15', north: '-25.97', west: '27.94' };
+  const POLL_MS = 10000, FRESH_MS = 45000, GPS_OLD_MS = 3 * MIN;
+  const ON_ROUTE_M = 60, TERMINAL_M = 150, SANDTON_SHARED_M = 700; // other Gautrain routes share the roads next to Sandton Station
+  const live = { ok: 0, err: '', fetching: false, buses: new Map(), trips: { toSandton: {}, toMontecasino: {} } };
+  const serviceSpan = (() => {
+    const ends = Object.keys(DIRS).map(id => { const d = DIRS[id]; return [d.starts[0], d.starts[d.starts.length - 1] + d.offsets[lastIdx(d)]]; });
+    return [Math.min(...ends.map(e => e[0])) - 20, Math.max(...ends.map(e => e[1])) + 20];
+  })();
+  function liveActive(now) { // live GPS is on and S5 buses could be running
+    const ds = dayStartMs(now), t = (now - ds) / MIN;
+    return state.live && dayInfo(ds).service && t >= serviceSpan[0] && t <= serviceSpan[1];
   }
-  const list = $("list");
-  if (!rows.length) {
-    list.innerHTML = lastOk
-      ? `<p class="muted" style="margin:0">No ${cfg.showAll || !routeInfoSeen ? "" : "S5 "}buses on the road in this area right now.</p>`
-      : "";
-  } else {
-    list.innerHTML = rows.slice(0, 8).map(({ b, a }) => {
-      const cls = a.here ? "now" : a.leaving ? "away" : a.approaching && a.eta <= cfg.lead ? "near" : "";
-      const stopped = Date.now() - b.movedAt > 2 * 60 * 1000;
-      const trend = a.here ? "at your stop" : a.approaching ? "coming towards you" : a.leaving ? "moving away" : stopped ? "stopped" : "not moving closer yet";
-      const age = Math.round((Date.now() - b.fix) / 1000);
-      const ageTxt = age < 90 ? `${age}s ago` : `${Math.round(age / 60)} min ago`;
-      const name = b.id ? `Bus ${esc(b.id)}` : "Bus";
-      return `<div class="bus ${b.key === watchKey ? "watch" : ""}" data-key="${esc(b.key)}">
-        <span class="tag ${b.match ? "" : "other"}">${b.match ? "S5" : esc((b.route || "Bus").slice(0, 5))}</span>
-        <div><div><b>${name}</b> · <span class="${cls}">${trend}</span></div>
-          <div class="meta">${a.d.toFixed(1)} km away${b.kmh != null && b.kmh < 120 ? ` · ${Math.round(b.kmh)} km/h` : ""} · GPS ${ageTxt}${b.stale ? " (old)" : ""}
-          ${b.key === watchKey ? " · <b>alerting for this bus</b>" : " · tap to alert for this bus"}</div></div>
-        <div class="eta ${cls}">${a.here ? "Here" : a.leaving ? "—" : "~" + Math.max(1, Math.round(a.eta)) + "'"}<small>${a.leaving ? "" : "est. min"}</small></div>
-      </div>`;
-    }).join("");
+  const liveFresh = now => live.ok > 0 && now - live.ok < FRESH_MS;
+  async function pollLive() {
+    const now = Date.now();
+    if (!liveActive(now)) { if (live.buses.size || live.ok) { live.buses.clear(); live.ok = 0; matchTrips(now); } live.err = ''; return; }
+    if (live.fetching || (document.visibilityState !== 'visible' && !state.alerts.some(al => !al.fired))) return;
+    live.fetching = true;
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = setTimeout(() => { if (ctl) ctl.abort(); }, 12000);
+    try {
+      const res = await fetch(FEED_URL, {
+        method: 'POST', cache: 'no-store', signal: ctl ? ctl.signal : undefined, body: JSON.stringify(FEED_BOX),
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + FEED_KEY, apikey: FEED_KEY }
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      const list = data && data.Result && data.Result.busPositions;
+      if (!Array.isArray(list)) throw new Error('unexpected answer');
+      ingestLive(list, Date.now());
+      live.ok = Date.now(); live.err = '';
+    } catch (e) {
+      live.err = e && e.name === 'AbortError' ? 'the live feed took too long to answer' : e instanceof TypeError ? "can't reach the live feed" : 'the live feed sent an error';
+    } finally {
+      clearTimeout(timer); live.fetching = false; tick(true);
+    }
   }
-  const stopName = cfg.stop === "custom" ? "your pin" : STOPS[cfg.stop].name;
-  $("foot").textContent = lastOk
-    ? `${rows.length} bus${rows.length === 1 ? "" : "es"} shown · ETAs are estimates from live GPS and straight-line distance to ${stopName}.` +
-      (routeInfoSeen ? "" : " Gautrain's feed doesn't say which route a bus is on, so every Gautrain bus between Montecasino and Sandton is shown.")
-    : "";
-  checkAlerts(rows);
-  setStatus();
-}
-document.getElementById("list").addEventListener("click", e => {
-  const el = e.target.closest(".bus"); if (!el) return;
-  const b = buses.get(el.dataset.key);
-  toggleWatch(el.dataset.key);
-  if (b) map.panTo(b.marker.getLatLng());
-});
-
-function setStatus() {
-  const pill = $("status"), txt = pill.querySelector("span");
-  const age = lastOk ? Math.round((Date.now() - lastOk) / 1000) : null;
-  pill.className = "pill";
-  if (lastErr && (!lastOk || age > cfg.every * 3)) { pill.classList.add("err"); txt.textContent = "Feed offline"; }
-  else if (lastOk) { pill.classList.add("live"); txt.textContent = age < 5 ? "Live" : `Live · ${age}s`; }
-  else txt.textContent = "Connecting…";
-  const m = $("feedMsg");
-  if (lastErr && (!lastOk || age > cfg.every * 3)) {
-    m.hidden = false;
-    m.innerHTML = `<b>Can't get live bus positions.</b> ${esc(lastErr)}<br>` +
-      `<span class="muted">Check your internet connection. If it keeps happening, the relay or Gautrain's feed may be down (⚙ settings shows the last answer). You can also check the <a href="https://www.gautrain.co.za/" target="_blank" rel="noopener">Gautrain website</a>. Bus info: <a href="tel:0102231098">010 223 1098</a>.</span>`;
-  } else m.hidden = true;
-}
-
-// ---------- polling ----------
-async function poll() {
-  if (fetching) return;
-  fetching = true;
-  const ctl = new AbortController();
-  const to = setTimeout(() => ctl.abort(), 12000);
-  try {
-    const headers = { "Content-Type": "application/json" };
-    if (cfg.feedKey) { headers.Authorization = "Bearer " + cfg.feedKey; headers.apikey = cfg.feedKey; }
-    const body = JSON.stringify({ east: String(BOX.east), south: String(BOX.south), north: String(BOX.north), west: String(BOX.west) });
-    const res = await fetch(cfg.feedUrl, { method: "POST", headers, body, signal: ctl.signal, cache: "no-store" });
-    const text = await res.text();
-    $("raw").textContent = `HTTP ${res.status} · ${new Date().toLocaleTimeString()}\n` + text.slice(0, 4000);
-    if (!res.ok) throw new Error(`The feed answered with an error (HTTP ${res.status}).`);
-    let data;
-    try { data = JSON.parse(text); } catch { throw new Error("The feed sent something that isn't bus data."); }
-    const vehicles = extractVehicles(data);
-    if (!vehicles.length) console.warn("Feed response had no recognisable bus positions", text.slice(0, 500));
-    ingest(vehicles);
-    lastOk = Date.now(); lastErr = null;
-  } catch (e) {
-    lastErr = e.name === "AbortError" ? "The feed took too long to answer."
-      : e instanceof TypeError ? "The feed couldn't be reached from this browser."
-      : e.message;
-  } finally {
-    clearTimeout(to); fetching = false; render();
+  function ingestLive(list, now) {
+    const seen = new Set();
+    list.forEach(v => {
+      const lat = Number(v.latitude), lon = Number(v.longitude), id = v.busId == null ? '' : String(v.busId);
+      if (!id || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      seen.add(id);
+      let b = live.buses.get(id);
+      if (!b) { b = { id, hist: [] }; live.buses.set(id, b); }
+      const ll = [lat, lon], fix = Number(v.lastModified) || now, last = b.hist[b.hist.length - 1];
+      if (!last || distM(last.ll, ll) > 8) b.hist.push({ ll, t: fix });
+      if (b.hist.length > 8) b.hist.shift();
+      b.ll = ll; b.fix = fix; b.old = now - fix > GPS_OLD_MS;
+      // A moving bus: the direction it has actually travelled. A parked one: its GPS heading.
+      const prev = b.hist.length > 1 ? b.hist[b.hist.length - 2] : null, h = Number(v.heading);
+      b.heading = prev && distM(prev.ll, ll) > 25 ? bearingDeg(prev.ll, ll) : v.heading !== '' && Number.isFinite(h) ? h : null;
+      classify(b);
+    });
+    Array.from(live.buses.keys()).forEach(id => { if (!seen.has(id)) live.buses.delete(id); });
+    matchTrips(now);
   }
-}
-function startPolling() {
-  clearInterval(pollTimer);
-  poll();
-  pollTimer = setInterval(poll, Math.max(5, cfg.every) * 1000);
-}
-setInterval(setStatus, 1000);
+  // Is this bus driving along the S5, and where? The feed doesn't say which route a bus is on.
+  function classify(b) {
+    b.dirId = null; b.at = null; b.pos = 0; b.off = 0;
+    if (distM(b.ll, OSM_STOPS[MONTE]) < TERMINAL_M) { // only the S5 serves Montecasino Terminal
+      b.at = 'monte'; b.dirId = 'toSandton'; b.d = DIR_RANGE.toSandton[0];
+      return;
+    }
+    const s = snap(b.ll, 0, LOOP_M, b.heading);
+    if (!s || s.dist > ON_ROUTE_M || s.score >= 1e4 || s.d < SANDTON_SHARED_M || s.d > LOOP_M - SANDTON_SHARED_M) return;
+    b.dirId = s.d < OSM_D[MONTE] ? 'toMontecasino' : 'toSandton';
+    b.d = s.d;
+    const p = posFromAlong(DIRS[b.dirId], s.d);
+    b.pos = p.pos; b.off = p.off;
+  }
+  // Pair each S5 bus with the timetable trip it is closest to, furthest-along bus first.
+  function matchTrips(now) {
+    const ds = dayStartMs(now), t = (now - ds) / MIN;
+    live.trips = { toSandton: {}, toMontecasino: {} };
+    Object.keys(DIRS).forEach(id => {
+      const dir = DIRS[id], used = new Set();
+      const list = Array.from(live.buses.values()).filter(b => b.dirId === id).sort((p, q) => q.off - p.off);
+      list.forEach(b => {
+        b.trip = null; b.late = 0;
+        if (b.old) return;
+        let best = null;
+        dir.starts.forEach((s, i) => {
+          if (used.has(i)) return;
+          const late = t - s - b.off; // minutes behind the timetable
+          if (late < (b.at === 'monte' ? -8 : -6) || late > 25) return;
+          const cost = Math.abs(late - 1);
+          if (!best || cost < best.cost) best = { i, late, cost };
+        });
+        if (best) { used.add(best.i); b.trip = best.i; b.late = best.late; live.trips[id][best.i] = b; }
+      });
+    });
+  }
+  // Live estimate for trip i at stop k today, or null.
+  function liveFor(dirId, i, k, now) {
+    if (!liveFresh(now)) return null;
+    const bus = live.trips[dirId] && live.trips[dirId][i];
+    if (!bus) return null;
+    const dir = DIRS[dirId], ok = dir.offsets[k], ds = dayStartMs(now);
+    const gone = bus.at !== 'monte' && bus.pos > k + 0.25 && bus.off > ok + 0.5;
+    let etaMs = gone ? null : now + Math.max(0, ok - bus.off) * MIN; // keeps the timetable's pace from here
+    if (etaMs && bus.at === 'monte') etaMs = Math.max(etaMs, ds + (dir.starts[i] + ok) * MIN); // waits for its departure time
+    return { bus, gone, etaMs, late: etaMs ? (etaMs - (ds + (dir.starts[i] + ok) * MIN)) / MIN : bus.late, here: !gone && Math.abs(bus.pos - k) < 0.25 && bus.at !== 'monte', stopsAway: Math.max(0, Math.ceil(k - bus.pos - 0.25)) };
+  }
 
-// ---------- controls ----------
-function $(id) { return document.getElementById(id); }
-$("stop").value = cfg.stop;
-$("lead").value = cfg.lead;
-$("stop").addEventListener("change", e => {
-  cfg.stop = e.target.value; store.set("stop", cfg.stop);
-  if (cfg.stop === "custom" && !cfg.custom) { const c = map.getCenter(); setCustom([c.lat, c.lng]); }
-  placeMe(); render();
-});
-$("lead").addEventListener("change", e => {
-  cfg.lead = Math.min(60, Math.max(1, +e.target.value || 10)); e.target.value = cfg.lead;
-  store.set("lead", cfg.lead); placeMe(); render();
-});
-$("alertsBtn").addEventListener("click", () => (alertsOn ? disableAlerts() : enableAlerts()));
-$("locate").addEventListener("click", () => {
-  if (!navigator.geolocation) return;
-  navigator.geolocation.getCurrentPosition(
-    p => { setCustom([p.coords.latitude, p.coords.longitude]); stopAutoFit(); map.setView(cfg.custom, 15); },
-    () => alert("Couldn't get your location. Choose \"Pin on map\" and tap your stop instead."),
-    { enableHighAccuracy: true, timeout: 10000 });
-});
-$("openSettings").addEventListener("click", () => {
-  $("feedUrl").value = cfg.feedUrl; $("feedKey").value = cfg.feedKey;
-  $("every").value = cfg.every; $("showAll").checked = cfg.showAll;
-  $("settings").showModal();
-});
-$("resetFeed").addEventListener("click", () => { $("feedUrl").value = DEFAULT_FEED; $("feedKey").value = DEFAULT_KEY; });
-$("copyRaw").addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText($("raw").textContent); $("copyRaw").textContent = "Copied"; } catch {}
-});
-$("settings").addEventListener("close", () => {
-  if ($("settings").returnValue !== "save") return;
-  cfg.feedUrl = $("feedUrl").value.trim() || DEFAULT_FEED;
-  cfg.feedKey = $("feedKey").value.trim();
-  cfg.every = Math.min(120, Math.max(5, +$("every").value || 10));
-  cfg.showAll = $("showAll").checked;
-  for (const k of ["feedUrl", "feedKey", "every", "showAll"]) store.set(k, cfg[k]);
-  lastOk = 0; lastErr = null;
-  for (const b of buses.values()) { b.marker.remove(); b.trail.remove(); }
-  buses.clear();
-  startPolling();
-});
+  /* ---------- Timetable logic ---------- */
+  function buildTrips(dir, b, a, delay, ds) {
+    const ob = dir.offsets[b], oa = dir.offsets[a], oe = dir.offsets[lastIdx(dir)];
+    return dir.starts.map((s0, i) => {
+      const s = s0 + delay;
+      return { i, dayStart: ds, startMin: s, depMin: s + ob, arrMin: s + oa, endMin: s + oe, startMs: ds + s * MIN, depMs: ds + (s + ob) * MIN, arrMs: ds + (s + oa) * MIN };
+    });
+  }
+  function busesOnRoad(dir, delay, ds, now) { // estimated position of every bus currently between the terminals
+    const t = (now - ds) / MIN, last = lastIdx(dir), out = [];
+    dir.starts.forEach((s0, i) => {
+      const s = s0 + delay;
+      if (t < s || t > s + dir.offsets[last]) return;
+      let k = 0;
+      while (k < last && t >= s + dir.offsets[k + 1]) k++;
+      const f = k < last ? (t - (s + dir.offsets[k])) / (dir.offsets[k + 1] - dir.offsets[k]) : 0;
+      out.push({ i, k, f, pos: k + f, startMin: s });
+    });
+    return out;
+  }
+  function computeModel(now) {
+    const dir = DIRS[state.dirId], b = state.board[dir.id], a = state.alight[dir.id];
+    const todayStart = dayStartMs(now), today = dayInfo(todayStart);
+    const walkMs = state.walk * MIN, leadMs = (state.walk + state.buffer) * MIN;
+    // With live GPS, an early bus brings "leave by" forward. A late one only pushes it back once the scheduled leave time has passed.
+    const decorate = x => {
+      x.live = x.dayStart === todayStart ? liveFor(dir.id, x.i, b, now) : null;
+      const eta = x.live && x.live.etaMs;
+      x.effDepMs = !eta ? x.depMs : eta < x.depMs || now >= x.depMs - leadMs ? eta : x.depMs;
+      x.leaveMs = x.effDepMs - leadMs;
+      x.reach = now + walkMs < x.effDepMs + MIN;
+      x.upcoming = !(x.live && x.live.gone) && now < Math.max(x.depMs, x.live && x.live.etaMs || 0) + MIN;
+      return x;
+    };
+    let mode = 'next', day = today, trips = null, hero = null, missed = [], later = [], gone = null;
+    if (today.service) {
+      const tt = buildTrips(dir, b, a, state.delay, todayStart).map(decorate);
+      const up = tt.filter(x => x.upcoming), hi = up.findIndex(x => x.reach);
+      gone = tt.filter(x => x.live && x.live.gone && x.depMs > now - 20 * MIN).pop() || null;
+      if (hi >= 0) { mode = 'today'; trips = tt; hero = up[hi]; missed = up.slice(0, hi); later = up.slice(hi + 1, hi + 5); }
+      else missed = up;
+    }
+    if (mode === 'next') {
+      day = nextServiceDay(todayStart);
+      trips = buildTrips(dir, b, a, state.delay, day.start).map(decorate);
+      hero = trips[0]; later = trips.slice(1, 5);
+    }
+    let status = 'idle';
+    if (mode === 'today') { const l = hero.leaveMs - now; status = l > 5 * MIN ? 'ok' : l > 0 ? 'soon' : 'go'; }
+    const onRoad = today.service ? busesOnRoad(dir, state.delay, todayStart, now) : [];
+    return { now, dir, b, a, today, todayStart, mode, day, trips, hero, missed, later, gone, last: trips[trips.length - 1], status, onRoad, liveOn: liveFresh(now) };
+  }
 
-// Relay address can also come from the link, e.g. s5-live-map.html#feed=https://…
-(function fromHash() {
-  const p = new URLSearchParams(location.hash.slice(1));
-  if (p.get("feed")) { cfg.feedUrl = p.get("feed"); store.set("feedUrl", cfg.feedUrl); }
-  if (p.get("key")) { cfg.feedKey = p.get("key"); store.set("feedKey", cfg.feedKey); }
+  /* ---------- Alerts ---------- */
+  const alertKey = (dirId, b, i, ds) => [dirId, b, i, ds].join(':');
+  const findAlert = key => state.alerts.find(al => al.key === key);
+  function alertTimes(al) {
+    const dir = DIRS[al.dirId];
+    let depMs = al.ds + (dir.starts[al.i] + dir.offsets[al.b] + state.delay) * MIN;
+    const now = Date.now(), lv = al.ds === dayStartMs(now) ? liveFor(al.dirId, al.i, al.b, now) : null;
+    const keepMs = Math.max(depMs, lv && lv.etaMs || 0); // a late bus keeps its alert until it arrives
+    if (lv && lv.etaMs && lv.etaMs < depMs) depMs = lv.etaMs; // running early: ring sooner
+    const leaveMs = depMs - (state.walk + state.buffer) * MIN;
+    return { depMs, keepMs, leaveMs, fireMs: al.atLeave ? leaveMs : leaveMs - state.lead * MIN, gone: !!(lv && lv.gone) };
+  }
+  function toggleAlert(dirId, b, i, ds) {
+    const dir = DIRS[dirId];
+    if (!dir || !(i >= 0 && i < dir.starts.length) || !(b >= 0 && b < lastIdx(dir)) || !Number.isFinite(ds)) return;
+    const key = alertKey(dirId, b, i, ds), existing = findAlert(key);
+    if (existing) { state.alerts = state.alerts.filter(al => al !== existing); keepAwake(); toast('Alert cancelled'); tick(true); return; }
+    const al = { key, dirId, b, i, ds, fired: false, atLeave: false }, now = Date.now(), t = alertTimes(al);
+    if (t.gone || now >= t.keepMs + MIN) { toast('That bus has already left.'); return; }
+    if (now + state.walk * MIN >= t.keepMs + MIN) { toast("You can't reach the stop before that bus leaves."); return; }
+    if (t.fireMs <= now) {
+      if (t.leaveMs - now > 15000) { al.atLeave = true; toast('Alert set — you need to leave in ' + fmtDur(t.leaveMs - now)); }
+      else { toast('Leave now to catch the ' + hhmmMs(t.depMs) + ' bus!'); return; }
+    } else {
+      toast('Alert set — rings at ' + hhmmMs(t.fireMs) + (state.lead ? ' (' + state.lead + ' min before you need to leave)' : ' (when you need to leave)'));
+    }
+    state.alerts.push(al);
+    maybeAskNotify();
+    keepAwake();
+    tick(true);
+  }
+  function processAlerts(now) {
+    state.alerts.forEach(al => {
+      const t = alertTimes(al);
+      if (!al.fired && !t.gone && now >= t.fireMs && now < t.keepMs + MIN) { al.fired = true; fireAlarm(al, t, now, false); }
+      if (t.gone && !al.goneNoted) { al.goneNoted = true; toast('Live GPS: the ' + hhmm(DIRS[al.dirId].starts[al.i] + DIRS[al.dirId].offsets[al.b]) + ' bus has already passed your stop'); }
+    });
+    const before = state.alerts.length;
+    state.alerts = state.alerts.filter(al => { const t = alertTimes(al); return !t.gone && now < t.keepMs + MIN; });
+    if (state.alerts.length !== before) keepAwake();
+  }
+  function fireAlarm(al, t, now, isTest) {
+    const dir = DIRS[al.dirId], from = stopTitle(dir.stops[al.b]), early = t.leaveMs - now > 30000;
+    $('alarmTitle').textContent = isTest ? 'Test alert' : early ? 'Get ready to leave' : 'Time to leave!';
+    $('alarmBody').innerHTML = (isTest ? 'This is how your bus alert looks and sounds.<br>' : '') +
+      'Your S5 bus ' + esc(toPhrase(dir)) + ' leaves <b>' + esc(from) + '</b> at <b>' + hhmmMs(t.depMs) + '</b> — in <b><span data-to="' + t.depMs + '">' + fmtDur(t.depMs - now) + '</span></b>.' +
+      (early ? '<br>You need to leave in <b><span data-to="' + t.leaveMs + '">' + fmtDur(t.leaveMs - now) + '</span></b>.' : '');
+    openOverlay('alarm');
+    startAlarmSound();
+    if (state.vibrate) { try { if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 900]); } catch (e) { /* not supported */ } }
+    if (!isTest) notify(early ? 'Get ready for your S5 bus' : 'Time to leave for your S5 bus', 'Leaves ' + from + ' at ' + hhmmMs(t.depMs) + '.');
+  }
+  function notify(title, body) {
+    try { if ('Notification' in window && window.Notification.permission === 'granted') new window.Notification(title, { body, tag: 's5-bus' }); } catch (e) { /* not available here */ }
+  }
+  function maybeAskNotify() {
+    try {
+      if ('Notification' in window && window.Notification.permission === 'default') {
+        const p = window.Notification.requestPermission();
+        if (p && p.catch) p.catch(() => {});
+      }
+    } catch (e) { /* not available here */ }
+  }
+  let wakeLock = null, wakeBusy = false;
+  function keepAwake() { // keep the screen on while an alert is waiting, where the browser allows it
+    const want = state.alerts.some(al => !al.fired);
+    try {
+      if (want && !wakeLock && !wakeBusy && navigator.wakeLock && document.visibilityState === 'visible') {
+        wakeBusy = true;
+        navigator.wakeLock.request('screen').then(l => { wakeLock = l; wakeBusy = false; if (l.addEventListener) l.addEventListener('release', () => { wakeLock = null; }); }).catch(() => { wakeBusy = false; });
+      } else if (!want && wakeLock) {
+        const l = wakeLock; wakeLock = null;
+        const p = l.release(); if (p && p.catch) p.catch(() => {});
+      }
+    } catch (e) { wakeBusy = false; }
+  }
+  let audioCtx = null, alarmLoop = null;
+  function unlockAudio() {
+    if (!state.sound) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      if (!audioCtx) audioCtx = new AC();
+      if (audioCtx.state === 'suspended' && audioCtx.resume) { const p = audioCtx.resume(); if (p && p.catch) p.catch(() => {}); }
+    } catch (e) { audioCtx = null; }
+  }
+  function chime() {
+    if (!audioCtx || !state.sound) return;
+    try {
+      const t0 = audioCtx.currentTime + 0.02;
+      [880, 1108.73, 1318.51, 1760].forEach((f, k) => {
+        const o = audioCtx.createOscillator(), g = audioCtx.createGain(), st = t0 + k * 0.16;
+        o.type = 'triangle';
+        o.frequency.setValueAtTime(f, st);
+        g.gain.setValueAtTime(0.0001, st);
+        g.gain.exponentialRampToValueAtTime(0.5, st + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, st + 0.45);
+        o.connect(g); g.connect(audioCtx.destination);
+        o.start(st); o.stop(st + 0.5);
+      });
+    } catch (e) { /* audio unavailable */ }
+  }
+  function startAlarmSound() {
+    stopAlarmSound();
+    if (!state.sound) return;
+    unlockAudio();
+    let n = 0;
+    chime();
+    alarmLoop = setInterval(() => { n += 1; if (n >= 20) { stopAlarmSound(); return; } chime(); }, 1500);
+  }
+  function stopAlarmSound() { if (alarmLoop) { clearInterval(alarmLoop); alarmLoop = null; } }
+
+  /* ---------- Views ---------- */
+  function howText() {
+    const parts = [];
+    if (state.walk) parts.push(state.walk + ' min walk');
+    if (state.buffer) parts.push(state.buffer + ' min early');
+    return '<button class="linklike" data-action="settings" aria-label="Change walking time and margin">' + (parts.length ? parts.join(' + ') : 'already at the stop') + '</button>';
+  }
+  function bannerHtml(m) {
+    const td = m.today, from = esc(stopTitle(m.dir.stops[m.b]));
+    if (!td.service) {
+      const why = td.hol ? esc(td.hol) + ' is a public holiday' : "It's " + DOW_L[td.dow];
+      return '<div class="banner warn" role="note"><span class="dot"></span><div><b>No regular Gautrain bus service today.</b> ' + why + ' — S5 buses run on weekdays only. Next service: <b>' + esc(relDay(m.day, td)) + '</b>.</div></div>';
+    }
+    if (m.mode === 'next') return '<div class="banner warn" role="note"><span class="dot"></span><div><b>No more buses you can catch today.</b> The first bus ' + esc(relDay(m.day, td)) + ' leaves ' + from + ' at <b>' + hhmm(m.hero.depMin) + '</b>.</div></div>';
+    if (m.last.depMs - m.now <= 60 * MIN) return '<div class="banner alert" role="note"><span class="dot"></span><div><b>Last bus today</b> leaves ' + from + ' at <b>' + hhmm(m.last.depMin) + '</b> — in <b><span data-to="' + m.last.depMs + '"></span></b>.</div></div>';
+    const gap = m.later.length ? m.later[0].depMin - m.hero.depMin : 0;
+    return '<div class="banner" role="note"><span class="dot"></span><div>Weekday service running' + (gap ? ' · a bus every ' + gap + ' min right now' : '') + ' · last bus ' + hhmm(m.last.depMin) + '</div></div>';
+  }
+  function lateHtml(late) {
+    const r = Math.round(late);
+    return r >= 2 ? '<span class="late">~' + r + ' min late</span>' : r <= -2 ? '<span class="early">~' + -r + ' min early</span>' : '<span class="ontime">on time</span>';
+  }
+  function missedHtml(m) {
+    if (!m.missed.length && m.gone && (!m.hero || m.gone.i < m.hero.i)) {
+      return '<div class="missed">' + ICON.info + '<span>The <b>' + hhmm(m.gone.depMin) + '</b> bus has already passed your stop <em class="gps">LIVE</em></span></div>';
+    }
+    if (!m.missed.length) return '';
+    const x = m.missed[0], more = m.missed.length - 1, lv = x.live && x.live.etaMs;
+    return '<div class="missed">' + ICON.info + '<span>The <b>' + hhmm(x.depMin) + '</b> bus' + (more ? ' (and ' + more + ' more)' : '') + (lv ? ' is due at your stop in <span data-to="' + x.effDepMs + '"></span> <em class="gps">LIVE</em>' : ' leaves in <span data-to="' + x.depMs + '"></span>') + ' — too soon to reach the stop with a ' + state.walk + '-min walk.</span></div>';
+  }
+  function statusHtml(m) {
+    const h = m.hero, leaveAt = m.mode === 'today' ? hhmmMs(h.leaveMs) : hhmm(h.depMin - state.walk - state.buffer);
+    if (m.status === 'idle') {
+      return '<div class="status idle"><div class="ico">' + ICON.moon + '</div><div><div class="big">' + (m.today.service ? 'No more buses today' : 'No buses today') + '</div><div class="small">First bus ' + esc(relDay(m.day, m.today)) + ' · leave by <b>' + leaveAt + '</b> · ' + howText() + '</div></div></div>';
+    }
+    if (m.status === 'go') {
+      const spare = Math.floor((h.effDepMs - m.now) / MIN) - state.walk;
+      const msg = !state.walk ? 'Your bus is due — be at the stop' : spare >= 1 ? "Head out now and you'll be at the stop about " + spare + ' min before it leaves' : "It's tight — hurry to the stop!";
+      return '<div class="status go"><div class="ico">' + ICON.alert + '</div><div><div class="big">Leave now!</div><div class="small">' + msg + '</div></div></div>';
+    }
+    return '<div class="status ' + m.status + '"><div class="ico">' + ICON.walk + '</div><div><div class="big">' + (m.status === 'soon' ? 'Get ready · leave in ' : 'Leave in ') + '<span data-to="' + h.leaveMs + '"></span></div><div class="small">Leave by <b>' + leaveAt + '</b> · ' + howText() + '</div></div></div>';
+  }
+  // One line on where your bus is, from live GPS when it can be matched.
+  function liveLine(m, h) {
+    const lv = h.live, dir = m.dir;
+    if (!lv) return '';
+    const at = lv.etaMs ? ' · at your stop ~<b>' + hhmmMs(lv.etaMs) + '</b>' : '';
+    if (lv.bus.at === 'monte') return 'Your bus is <b>waiting at ' + esc(stopTitle(dir.stops[0])) + '</b> · ' + lateHtml(lv.late) + (m.b ? at : '');
+    if (lv.here) return '<b>Your bus is at your stop now</b> · ' + lateHtml(lv.late);
+    const near = stopTitle(dir.stops[Math.min(lastIdx(dir), Math.floor(lv.bus.pos + 0.5))]);
+    return 'Your bus is <b>' + (lv.stopsAway ? nStops(lv.stopsAway) + ' away' : 'about to reach your stop') + '</b> · near ' + esc(near) + ' · ' + lateHtml(lv.late) + at;
+  }
+  function whereHtml(m) {
+    if (m.mode !== 'today') return '';
+    const h = m.hero, dir = m.dir;
+    if (h.live) return '<div class="livebox">' + ICON.live + '<span>' + liveLine(m, h) + ' <em class="gps">LIVE</em></span></div>';
+    if (m.liveOn && h.startMs <= m.now) return '<div class="livebox quiet">' + ICON.live + '<span>Live GPS can\'t pick out your bus yet, so this uses the timetable. <em class="est">timetable</em></span></div>';
+    const bus = m.liveOn ? null : m.onRoad.find(x => x.i === h.i);
+    if (bus) {
+      if (bus.k >= m.b) return '<div class="where">' + ICON.pin + '<span><b>Your bus should be at your stop now</b> <em class="est">timetable</em></span></div>';
+      return '<div class="where">' + ICON.bus + '<span>Your bus is <b>' + nStops(m.b - bus.k) + ' away</b> · near ' + esc(stopTitle(dir.stops[bus.k])) + ' <em class="est">timetable</em></span></div>';
+    }
+    const track = m.liveOn ? ' · live tracking starts when it sets off' : '';
+    if (m.b === 0) return '<div class="where">' + ICON.bus + '<span>Starts here at the terminal at <b>' + hhmm(h.startMin) + '</b>' + track + '</span></div>';
+    return '<div class="where">' + ICON.bus + '<span>Leaves ' + esc(stopTitle(dir.stops[0])) + ' at <b>' + hhmm(h.startMin) + '</b> · ' + nStops(m.b) + ' before yours' + track + '</span></div>';
+  }
+  function heroHtml(m) {
+    const h = m.hero, dir = m.dir, isToday = m.mode === 'today', lastI = dir.starts.length - 1;
+    const from = stopParts(dir.stops[m.b]), to = stopParts(dir.stops[m.a]), tags = [];
+    if (h.i === lastI) tags.push('<span class="tag red">Last bus' + (isToday ? ' today' : '') + '</span>');
+    else if (h.i === 0) tags.push('<span class="tag">First bus</span>');
+    if (state.delay) tags.push('<span class="tag gold">+' + state.delay + ' min delay</span>');
+    const on = isToday && !!findAlert(alertKey(dir.id, m.b, h.i, h.dayStart));
+    const alertBtn = isToday ? '<button class="btn ' + (on ? 'armed' : 'primary') + '" data-action="alert" data-dir="' + dir.id + '" data-b="' + m.b + '" data-i="' + h.i + '" data-ds="' + h.dayStart + '" aria-pressed="' + on + '">' + ICON.bell + '<span>' + (on ? 'Alert set' : 'Alert me') + '</span></button>' : '';
+    return '<article class="hero" aria-label="Next bus">' +
+      '<div class="eyebrow"><span>' + (isToday ? 'Next bus you can catch' : 'Next bus · ' + esc(relDay(m.day, m.today))) + '</span>' + tags.join('') + '</div>' +
+      '<div class="hero-main"><div class="hero-time">' + hhmm(h.depMin) + '</div><div class="hero-cd">' +
+        (isToday && h.live && h.live.etaMs ? '<div class="lbl">live · due in</div><div class="val livev" data-to="' + h.live.etaMs + '"></div>' : '<div class="lbl">departs in</div><div class="val" data-to="' + h.depMs + '"></div>') + '</div></div>' +
+      '<div class="hero-route">from <b>' + esc(from.title) + '</b>' + (from.area ? ' · ' + esc(from.area) : '') + '<br>arrives <b>' + esc(to.title) + '</b> at <b>' + hhmm(h.arrMin) + '</b> · ' + (h.arrMin - h.depMin) + ' min ride</div>' +
+      statusHtml(m) + whereHtml(m) +
+      '<div class="actions">' + alertBtn + '<button class="btn" data-action="tab" data-tab="route">' + ICON.route + '<span>Track on route</span></button></div>' +
+      '</article>';
+  }
+  function laterHtml(m) {
+    if (!m.later.length) return '';
+    const isToday = m.mode === 'today', lastI = m.dir.starts.length - 1;
+    const rows = m.later.map(x => {
+      const on = isToday && !!findAlert(alertKey(m.dir.id, m.b, x.i, x.dayStart));
+      const bell = isToday ? '<button class="bell' + (on ? ' on' : '') + '" data-action="alert" data-dir="' + m.dir.id + '" data-b="' + m.b + '" data-i="' + x.i + '" data-ds="' + x.dayStart + '" aria-pressed="' + on + '" aria-label="' + (on ? 'Cancel the alert' : 'Set an alert') + ' for the ' + hhmm(x.depMin) + ' bus">' + ICON.bell + '</button>' : '';
+      const lv = isToday && x.live && x.live.etaMs ? ' <em class="gps">LIVE ' + (Math.round(x.live.late) >= 2 ? '+' + Math.round(x.live.late) : Math.round(x.live.late) <= -2 ? Math.round(x.live.late) : 'on time') + '</em>' : '';
+      return '<div class="row"><div class="t">' + hhmm(x.depMin) + '</div><div class="meta">' + (isToday ? 'in <b><span data-to="' + (x.live && x.live.etaMs || x.depMs) + '"></span></b> · ' : '') + 'arrives <b>' + hhmm(x.arrMin) + '</b>' + lv + (x.i === lastI ? ' <span class="tag red">Last bus</span>' : '') + '<br>leave by ' + (isToday ? hhmmMs(x.leaveMs) : hhmm(x.depMin - state.walk - state.buffer)) + '</div>' + bell + '</div>';
+    }).join('');
+    return '<div class="section-title"><span>' + (isToday ? 'Later buses' : 'Then · ' + esc(m.day.short)) + '</span><span class="aside">from ' + esc(stopTitle(m.dir.stops[m.b])) + '</span></div><div class="list">' + rows + '</div>';
+  }
+  function liveHtml(m) { return bannerHtml(m) + missedHtml(m) + heroHtml(m) + laterHtml(m); }
+  function helpHtml(m) {
+    const chips = [0, 5, 10, 15].map(v => '<button class="chip" data-action="delay" data-v="' + v + '" aria-pressed="' + (state.delay === v) + '">' + (v ? '+' + v + ' min' : 'On time') + '</button>').join('');
+    const lv = m && m.mode === 'today' && m.hero.live;
+    const intro = lv ? 'Live GPS says your bus is ' + lateHtml(lv.late) + '. The countdown above already allows for it. If live GPS drops out, shift every time in the app by hand:'
+      : 'Gautrain buses share the road, so traffic can hold them up — especially in peak hours. When live GPS can\'t see your bus, shift every time in the app to match:';
+    return '<section class="card" aria-labelledby="lateTitle"><h3 id="lateTitle">Bus running late?</h3><p>' + intro + '</p>' +
+      '<div class="chips" role="group" aria-label="Delay adjustment">' + chips + '</div>' +
+      '<button class="call" data-action="tab" data-tab="route" style="width:100%;text-align:start;font:inherit"><span class="ci live">' + ICON.live + '</span><span><b>See your bus on the live map</b><small>Route tab · real GPS positions every 10 seconds</small></span></button>' +
+      '<a class="call" href="tel:' + INFO_TEL + '"><span class="ci">' + ICON.phone + '</span><span><b>Where\'s my bus? Call ' + INFO_LINE + '</b><small>Gautrain bus information line</small></span></a></section>';
+  }
+  // Every S5 bus in this direction for the stop list: live where GPS has it, otherwise estimated from the timetable.
+  function railBuses(m) {
+    const dir = m.dir, out = [], seen = new Set(), heroI = m.mode === 'today' ? m.hero.i : -1;
+    if (m.liveOn) {
+      live.buses.forEach(b => {
+        if (b.dirId !== dir.id || b.old) return;
+        out.push({ pos: b.pos, i: b.trip, live: true, you: b.trip === heroI, label: b.trip != null ? hhmm(dir.starts[b.trip]) : 'S5', near: dir.stops[Math.min(lastIdx(dir), Math.floor(b.pos + 0.5))] });
+        if (b.trip != null) seen.add(b.trip);
+      });
+    }
+    m.onRoad.forEach(x => {
+      if (seen.has(x.i)) return;
+      out.push({ pos: x.pos, i: x.i, live: false, est: m.liveOn, you: x.i === heroI, label: hhmm(x.startMin), near: dir.stops[x.k] });
+    });
+    return out;
+  }
+  function routeHeadHtml(m) {
+    const dir = m.dir, h = m.hero, isToday = m.mode === 'today';
+    const term = esc(stopTitle(dir.stops[0])), boardT = esc(stopTitle(dir.stops[m.b]));
+    const buses = railBuses(m), liveCount = buses.filter(x => x.live).length;
+    let title, sub;
+    if (!m.today.service) { title = 'No buses on the road today'; sub = 'Regular weekday service resumes <b>' + esc(relDay(m.day, m.today)) + '</b>. Times below are for the first bus.'; }
+    else {
+      const n = m.liveOn ? liveCount : m.onRoad.length;
+      title = n ? n + ' S5 bus' + (n === 1 ? '' : 'es') + ' on the road · ' + dir.label : 'No S5 buses on the road right now';
+      const sched = m.onRoad.find(x => isToday && x.i === h.i);
+      if (!isToday) sub = 'Times below are for the first bus ' + esc(relDay(m.day, m.today)) + '.';
+      else if (h.live) sub = liveLine(m, h).replace(/^Your bus/, 'Your <b>' + hhmm(h.depMin) + '</b> bus');
+      else if (sched && !m.liveOn) sub = sched.k >= m.b ? 'Your <b>' + hhmm(h.depMin) + '</b> bus should be at ' + boardT + ' now.' : 'Your <b>' + hhmm(h.depMin) + '</b> bus is <b>' + nStops(m.b - sched.k) + '</b> from ' + boardT + '.';
+      else if (h.startMs > m.now) sub = (m.b === 0 ? 'Your bus' : 'Your <b>' + hhmm(h.depMin) + '</b> bus') + ' leaves ' + term + ' at <b>' + hhmm(h.startMin) + '</b> — in <span data-to="' + h.startMs + '"></span>.';
+      else sub = 'Your <b>' + hhmm(h.depMin) + '</b> bus left ' + term + ' at ' + hhmm(h.startMin) + '. Live GPS can\'t pick it out yet.';
+    }
+    let bar;
+    if (!state.live) bar = '<div class="livebar"><span class="d"></span><span>Live GPS is off · <button class="linklike" data-action="settings">turn it on in Settings</button></span></div>';
+    else if (!liveActive(m.now)) bar = '<div class="livebar"><span class="d"></span><span>Live GPS starts with the first weekday bus. Until then, times come from the timetable.</span></div>';
+    else if (m.liveOn) bar = '<div class="livebar on"><span class="d"></span><span><b>Live GPS</b> · updated <span data-from="' + live.ok + '"></span> · buses on the S5 roads are shown as S5</span></div>';
+    else if (live.err) bar = '<div class="livebar err"><span class="d"></span><span><b>Live GPS unavailable</b> — ' + esc(live.err) + '. Showing timetable estimates.</span></div>';
+    else bar = '<div class="livebar"><span class="d"></span><span>Connecting to live GPS…</span></div>';
+    return '<div class="route-head"><h2>' + title + '</h2><p>' + sub + '</p>' +
+      '<div class="legend"><span><i class="lg you"></i>Your bus</span><span><i class="lg"></i>Other S5 buses</span><span><i class="lg ring"></i>Board</span><span><i class="lg off"></i>Get off</span></div>' + bar + '</div>';
+  }
+  function routeHtml(m) {
+    const dir = m.dir, n = dir.stops.length, last = n - 1, ROW = 56, h = m.hero, isToday = m.mode === 'today';
+    const buses = railBuses(m), mine = isToday ? buses.find(x => x.you) : null;
+    const y = pos => Math.round((pos * ROW + ROW / 2) * 2) / 2;
+    const rows = dir.stops.map((raw, k) => {
+      const p = stopParts(raw), cls = ['stop'];
+      if (k === 0 || k === last) cls.push('term');
+      if (mine && k <= mine.pos) cls.push('passed');
+      if (k === m.b) cls.push('board');
+      if (k === m.a) cls.push('alight');
+      const flag = k === m.b ? '<span class="flag board">BOARD</span>' : k === m.a ? '<span class="flag alight">GET OFF</span>' : '';
+      return '<div class="' + cls.join(' ') + '" style="top:' + (k * ROW) + 'px"><span class="node"></span><div class="stxt"><div class="nm">' + esc(p.title) + flag + '</div>' + (p.area ? '<div class="ar">' + esc(p.area) + '</div>' : '') + '</div><div class="tm">' + hhmm(h.startMin + dir.offsets[k]) + '</div></div>';
+    }).join('');
+    let markers = buses.map(x => {
+      const cls = 'bus' + (x.you ? ' you' : '') + (x.live ? ' live' : x.est ? ' est' : '');
+      const what = (x.you ? 'Your bus' : 'S5 bus') + (x.i != null ? ' that left at ' + x.label : '') + ', near ' + stopTitle(x.near) + (x.live ? ' (live GPS)' : ' (estimated from the timetable)');
+      return '<div class="' + cls + '" style="top:' + y(x.pos) + 'px" role="img" aria-label="' + esc(what) + '">' + (x.live ? '<i class="lv"></i>' : ICON.bus) + x.label + '</div>';
+    }).join('');
+    if (isToday && !mine && h.startMs > m.now && h.startMs - m.now <= 20 * MIN) {
+      markers += '<div class="bus sched" style="top:' + y(0) + 'px" role="img" aria-label="Your bus, scheduled to leave at ' + hhmm(h.startMin) + '">' + ICON.bus + hhmm(h.startMin) + '</div>';
+    }
+    const done = mine ? '<div class="rail-done" style="top:' + y(0) + 'px;height:' + Math.max(0, y(mine.pos) - y(0)) + 'px"></div>' : '';
+    return '<div class="track-cap"><span>Stop</span><span>' + (isToday ? 'Your ' + hhmm(h.depMin) + ' bus' : 'First bus') + '</span></div>' +
+      '<div class="track" style="height:' + (n * ROW) + 'px"><div class="rail" style="top:' + y(0) + 'px;height:' + (last * ROW) + 'px"></div>' + done + rows + markers + '</div>' +
+      '<p class="foot">' + (m.liveOn ? 'Buses with a green dot are live GPS positions. Dashed ones are estimated from the timetable, because live GPS can\'t see them.' : 'Positions are estimated from the timetable' + (state.delay ? ' (shifted +' + state.delay + ' min)' : '') + '.') + ' Stop times are for your bus as scheduled. Where\'s my bus? Call ' + INFO_LINE + '.</p>';
+  }
+
+  /* ---------- Live map ---------- */
+  let lmap = null, routeLayer = null, busLayer = null, mapKey = '', mapNote = '';
+  const busMarkers = new Map();
+  function initMap() {
+    if (lmap) return true;
+    if (!window.L) return false;
+    lmap = window.L.map('routeMap', { zoomControl: false, attributionControl: true, zoomSnap: 0.25, zoomDelta: 0.5 });
+    window.L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      subdomains: 'abcd', maxZoom: 19,
+      attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · © <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>'
+    }).addTo(lmap);
+    routeLayer = window.L.layerGroup().addTo(lmap);
+    busLayer = window.L.layerGroup().addTo(lmap);
+    return true;
+  }
+  function fitTrip(m) {
+    if (!lmap) return;
+    lmap.invalidateSize();
+    lmap.fitBounds(window.L.latLngBounds(sliceLoop(m.dir.along[m.b], m.dir.along[m.a])), { padding: [28, 28] });
+  }
+  const divIcon = html => window.L.divIcon({ className: '', html, iconSize: [0, 0], iconAnchor: [0, 0] });
+  function mapSync(m) {
+    const card = $('mapCard');
+    if (!initMap()) {
+      if (!mapNote) { mapNote = 'The map needs an internet connection. The stop list below still works.'; card.insertAdjacentHTML('beforeend', '<div class="nomap">' + mapNote + '</div>'); }
+      return;
+    }
+    const dir = m.dir, tripKey = dir.id + ':' + m.b + ':' + m.a, key = tripKey + ':' + m.hero.i;
+    if (key !== mapKey) {
+      const refit = mapKey.split(':').slice(0, 3).join(':') !== tripKey;
+      mapKey = key;
+      routeLayer.clearLayers();
+      const L = window.L, R = DIR_RANGE[dir.id];
+      L.polyline(LOOP, { color: '#3b4b61', weight: 4, opacity: 0.9, interactive: false }).addTo(routeLayer);
+      L.polyline(sliceLoop(R[0], R[1]), { color: '#a3792c', weight: 5, opacity: 0.95, interactive: false }).addTo(routeLayer);
+      L.polyline(sliceLoop(dir.along[m.b], dir.along[m.a]), { color: '#f4b63f', weight: 7, opacity: 1, interactive: false }).addTo(routeLayer);
+      dir.stops.forEach((raw, k) => {
+        const cls = k === m.b ? 'board' : k === m.a ? 'alight' : '';
+        L.marker(pointAt(dir.along[k]), { icon: divIcon('<div class="mstop ' + cls + '"></div>'), keyboard: false, zIndexOffset: cls ? 300 : 0 })
+          .bindTooltip(esc(stopTitle(raw)) + ' · ' + hhmm(m.hero.startMin + dir.offsets[k]) + (cls === 'board' ? ' · board' : cls === 'alight' ? ' · get off' : ''), { direction: 'top', offset: [0, -8] })
+          .addTo(routeLayer);
+      });
+      if (refit) fitTrip(m);
+    }
+    const heroI = m.mode === 'today' ? m.hero.i : -1, seen = new Set();
+    if (m.liveOn) {
+      live.buses.forEach(b => {
+        if (!b.dirId) return;
+        seen.add(b.id);
+        const you = b.dirId === dir.id && b.trip === heroI && b.trip != null;
+        const cls = 'lbus' + (you ? ' you' : b.dirId !== dir.id ? ' other' : '') + (b.old ? ' old' : '');
+        const label = (you ? 'You · ' : '') + (b.trip != null ? hhmm(DIRS[b.dirId].starts[b.trip]) : 'S5');
+        const arrow = b.heading == null ? '' : '<i class="ar" style="transform:rotate(' + Math.round(b.heading) + 'deg)"></i>';
+        const html = '<div class="' + cls + '">' + arrow + label + '</div>';
+        const age = Math.max(0, Math.round((Date.now() - b.fix) / 1000));
+        const tip = 'Bus ' + esc(b.id) + ' · ' + esc(DIRS[b.dirId].label) + (b.trip != null ? ' · the ' + hhmm(DIRS[b.dirId].starts[b.trip]) + ' from ' + esc(stopTitle(DIRS[b.dirId].stops[0])) + ' · ' + lateHtml(b.late).replace(/<[^>]+>/g, '') : '') + ' · GPS ' + (age < 90 ? age + 's' : Math.round(age / 60) + ' min') + ' ago';
+        let mk = busMarkers.get(b.id);
+        if (!mk) {
+          mk = window.L.marker(b.ll, { icon: divIcon(html), zIndexOffset: you ? 1000 : 500, keyboard: false }).bindTooltip(tip, { direction: 'top', offset: [0, -14] }).addTo(busLayer);
+          mk.html = html; busMarkers.set(b.id, mk);
+        } else {
+          if (mk.html !== html) { mk.setIcon(divIcon(html)); mk.html = html; mk.setZIndexOffset(you ? 1000 : 500); }
+          mk.setTooltipContent(tip);
+          glide(mk, b.ll);
+        }
+      });
+    }
+    busMarkers.forEach((mk, id) => { if (!seen.has(id)) { busLayer.removeLayer(mk); busMarkers.delete(id); } });
+  }
+  function glide(mk, to) {
+    const from = mk.getLatLng();
+    if (Math.abs(from.lat - to[0]) < 1e-7 && Math.abs(from.lng - to[1]) < 1e-7) return;
+    const t0 = performance.now(), ms = 1500;
+    cancelAnimationFrame(mk.anim);
+    const step = t => {
+      const k = Math.min(1, (t - t0) / ms), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      mk.setLatLng([from.lat + (to[0] - from.lat) * e, from.lng + (to[1] - from.lng) * e]);
+      if (k < 1) mk.anim = requestAnimationFrame(step);
+    };
+    mk.anim = requestAnimationFrame(step);
+  }
+  function timetableHtml(m) {
+    const dir = m.dir, day = m.mode === 'today' ? m.today : m.day, isToday = day.start === m.todayStart;
+    const trips = buildTrips(dir, m.b, m.a, state.delay, day.start), lastI = trips.length - 1;
+    const groups = new Map();
+    trips.forEach(x => { const hr = Math.floor(x.depMin / 60); if (!groups.has(hr)) groups.set(hr, []); groups.get(hr).push(x); });
+    let body = '';
+    groups.forEach((list, hr) => {
+      const gaps = list.filter(x => x.i < lastI).map(x => trips[x.i + 1].depMin - x.depMin);
+      const lo = Math.min.apply(null, gaps), hi = Math.max.apply(null, gaps);
+      const fq = gaps.length ? 'every ' + (lo === hi ? lo : lo + '–' + hi) + ' min' : 'last bus';
+      const slots = list.map(x => {
+        const past = isToday && m.now >= x.depMs + MIN, reach = isToday && m.now + state.walk * MIN < x.depMs + MIN;
+        const on = !!findAlert(alertKey(dir.id, m.b, x.i, day.start)), cls = ['slot'];
+        if (past) cls.push('past');
+        if (m.hero && x.i === m.hero.i) cls.push('next');
+        if (on) cls.push('alarm');
+        if (x.i === lastI) cls.push('lastbus');
+        const inner = '<b>' + hhmm(x.depMin) + '</b><small>' + (x.i === lastI ? 'last → ' : '→ ') + hhmm(x.arrMin) + '</small>';
+        return reach ? '<button class="' + cls.join(' ') + '" data-action="alert" data-dir="' + dir.id + '" data-b="' + m.b + '" data-i="' + x.i + '" data-ds="' + day.start + '" aria-pressed="' + on + '" aria-label="' + hhmm(x.depMin) + ' bus, arrives ' + hhmm(x.arrMin) + '. ' + (on ? 'Alert set, tap to cancel' : 'Tap to set an alert') + '">' + inner + '</button>' : '<div class="' + cls.join(' ') + '">' + inner + '</div>';
+      }).join('');
+      body += '<div class="hour"><div><div class="h">' + pad(hr % 24) + 'h</div><div class="fq">' + fq + '</div></div><div class="slots">' + slots + '</div></div>';
+    });
+    const when = isToday ? 'Today (' + day.short + ')' : cap(relDay(day, m.today));
+    return '<div class="tt-head"><h2>' + esc(stopTitle(dir.stops[m.b])) + ' → ' + esc(stopTitle(dir.stops[m.a])) + '</h2><p>' + esc(when) + ' · ' + trips.length + ' buses · departure from your stop with arrival underneath' + (state.delay ? ' · shifted +' + state.delay + ' min' : '') + '.' + (isToday ? ' Tap a time to get a leave-by alert.' : '') + '</p></div><div class="list">' + body + '</div>';
+  }
+  function planHtml(m) {
+    const dir = m.dir, T = parseHHMM(state.planTime);
+    if (T == null) return '<p class="muted">Pick a time to plan your trip.</p>';
+    const trips = buildTrips(dir, m.b, m.a, 0, 0), lead = state.walk + state.buffer;
+    const fromT = esc(stopTitle(dir.stops[m.b])), toT = esc(stopTitle(dir.stops[m.a]));
+    let pick, alt, altLabel, headline;
+    if (state.planMode === 'arrive') {
+      const ok = trips.filter(x => x.arrMin <= T);
+      if (!ok.length) return '<div class="plan-out"><p class="muted">No S5 bus reaches ' + toT + ' by ' + hhmm(T) + '. The first bus of the day arrives at <b>' + hhmm(trips[0].arrMin) + '</b>.</p></div>';
+      pick = ok[ok.length - 1]; alt = ok.length > 1 ? ok[ok.length - 2] : null; altLabel = 'Safer option';
+      headline = 'Take the ' + hhmm(pick.depMin) + ' bus — arrives ' + (T - pick.arrMin ? (T - pick.arrMin) + ' min early' : 'right on time');
+    } else {
+      const ok = trips.filter(x => x.depMin - lead >= T);
+      if (!ok.length) return '<div class="plan-out"><p class="muted">No S5 bus you can catch after ' + hhmm(T) + '. The last bus leaves ' + fromT + ' at <b>' + hhmm(trips[trips.length - 1].depMin) + '</b>.</p></div>';
+      pick = ok[0]; alt = ok[1] || null; altLabel = 'Next option';
+      headline = 'Take the ' + hhmm(pick.depMin) + ' bus';
+    }
+    const steps = [['', pick.depMin - lead, 'Leave', state.walk ? state.walk + ' min walk to the stop' : 'Already at the stop']];
+    if (state.buffer) steps.push(['', pick.depMin - state.buffer, 'Be at ' + fromT, state.buffer + ' min before the bus']);
+    steps.push(['bus-step', pick.depMin, 'S5 bus departs', dir.label]);
+    steps.push(['end-step', pick.arrMin, 'Arrive ' + toT, (pick.arrMin - pick.depMin) + ' min ride']);
+    let btn = '';
+    if (m.today.service) {
+      const on = !!findAlert(alertKey(dir.id, m.b, pick.i, m.todayStart));
+      const depMs = m.todayStart + (pick.depMin + state.delay) * MIN;
+      if (on || m.now < depMs - lead * MIN) btn = '<button class="btn ' + (on ? 'armed' : 'primary') + '" data-action="alert" data-dir="' + dir.id + '" data-b="' + m.b + '" data-i="' + pick.i + '" data-ds="' + m.todayStart + '" aria-pressed="' + on + '">' + ICON.bell + '<span>' + (on ? 'Alert set for today' : 'Alert me for this bus today') + '</span></button>';
+    }
+    return '<div class="plan-out"><h4>' + headline + '</h4><div class="sub">From ' + fromT + ' · scheduled weekday times</div>' +
+      '<ol class="journey">' + steps.map(s => '<li class="' + s[0] + '"><span class="jt">' + hhmm(s[1]) + '</span><span class="jd"></span><span class="jx">' + s[2] + '<small>' + s[3] + '</small></span></li>').join('') + '</ol>' +
+      (alt ? '<div class="backup">' + altLabel + ': the <b>' + hhmm(alt.depMin) + '</b> bus, arriving <b>' + hhmm(alt.arrMin) + '</b> (leave by ' + hhmm(alt.depMin - lead) + ').</div>' : '') + btn + '</div>';
+  }
+  function alertsListHtml() {
+    if (!state.alerts.length) return '<p class="muted">No alerts set yet. Tap <b>Alert me</b> on any bus and the app will ring when it\'s time to leave.</p>';
+    const rows = state.alerts.slice().sort((p, q) => alertTimes(p).depMs - alertTimes(q).depMs).map(al => {
+      const dir = DIRS[al.dirId], t = alertTimes(al);
+      return '<div class="row"><div class="t">' + hhmmMs(t.depMs) + '</div><div class="meta"><b>' + esc(stopTitle(dir.stops[al.b])) + '</b> · ' + esc(dir.label) + '<br>' + (al.fired ? 'Alert has rung' : 'Rings at ' + hhmmMs(t.fireMs) + ' · in <span data-to="' + t.fireMs + '"></span>') + '</div><button class="bell on" data-action="cancel-alert" data-key="' + esc(al.key) + '" aria-label="Cancel the ' + hhmmMs(t.depMs) + ' alert">' + ICON.x + '</button></div>';
+    }).join('');
+    return '<div class="list">' + rows + '</div><p class="hint">Keep this app open on your screen — alerts ring while it is open.</p>';
+  }
+
+  /* ---------- Rendering ---------- */
+  const htmlCache = {};
+  function setHtml(id, html) { if (htmlCache[id] === html) return; const el = $(id); if (!el) return; el.innerHTML = html; htmlCache[id] = html; }
+  function updateCountdowns(now) {
+    const els = document.querySelectorAll('[data-to]');
+    for (let k = 0; k < els.length; k++) { const v = fmtDur(Number(els[k].getAttribute('data-to')) - now); if (els[k].textContent !== v) els[k].textContent = v; }
+    const ago = document.querySelectorAll('[data-from]');
+    for (let k = 0; k < ago.length; k++) { const s = Math.max(0, Math.round((now - Number(ago[k].getAttribute('data-from'))) / 1000)), v = s < 2 ? 'just now' : s + 's ago'; if (ago[k].textContent !== v) ago[k].textContent = v; }
+  }
+  function renderClock(now) {
+    const d = new Date(now + SAST);
+    setHtml('clockTime', pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + '<small>:' + pad(d.getUTCSeconds()) + '</small>');
+    setHtml('clockDate', DOW[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + MON[d.getUTCMonth()]);
+  }
+  function updateBadge() {
+    const n = state.alerts.length, el = $('alertCount');
+    el.hidden = !n; el.textContent = String(n);
+    $('alertsBtn').setAttribute('aria-label', n ? 'Your alerts (' + n + ' set)' : 'Your alerts');
+    const now = Date.now(), dot = $('liveDot'), cls = 'ldot' + (liveFresh(now) ? ' on' : liveActive(now) && live.err ? ' err' : '');
+    if (dot.className !== cls) dot.className = cls;
+    $('liveNote').textContent = !state.live ? 'Off: buses are placed using the timetable only.'
+      : liveFresh(now) ? 'Working · updated every 10 seconds.'
+      : liveActive(now) ? (live.err ? 'Not working right now: ' + live.err + '.' : 'Connecting…')
+      : 'Starts with the first weekday bus.';
+  }
+  let lastAnnounce = '';
+  function announce(m) {
+    const key = m.mode + ':' + m.hero.i + ':' + m.status + ':' + state.dirId;
+    if (key === lastAnnounce) return;
+    lastAnnounce = key;
+    $('liveStatus').textContent = m.mode === 'today'
+      ? 'Next bus ' + hhmm(m.hero.depMin) + '. ' + (m.status === 'go' ? 'Leave now.' : 'Leave by ' + hhmmMs(m.hero.leaveMs) + '.')
+      : 'No more buses today. Next bus ' + relDay(m.day, m.today) + ' at ' + hhmm(m.hero.depMin) + '.';
+  }
+  function renderStatic() {
+    const dir = DIRS[state.dirId], b = state.board[dir.id], a = state.alight[dir.id];
+    Object.keys(DIRS).forEach(id => $('dir-' + id).setAttribute('aria-pressed', String(id === state.dirId)));
+    setHtml('boardSel', dir.stops.slice(0, -1).map((s, k) => '<option value="' + k + '"' + (k === b ? ' selected' : '') + '>' + esc(optLabel(s)) + '</option>').join(''));
+    setHtml('alightSel', dir.stops.map((s, k) => k === 0 ? '' : '<option value="' + k + '"' + (k === a ? ' selected' : '') + (k <= b ? ' disabled' : '') + '>' + esc(optLabel(s)) + '</option>').join(''));
+    $('boardSel').value = String(b);
+    $('alightSel').value = String(a);
+    $('tripCaption').textContent = 'S5 ' + toPhrase(dir) + ' · ' + nStops(a - b) + ' · ' + (dir.offsets[a] - dir.offsets[b]) + ' min ride';
+    $('walk').value = String(state.walk); $('walkOut').textContent = state.walk + ' min';
+    $('buffer').value = String(state.buffer); $('bufferOut').textContent = state.buffer + ' min';
+    $('lead').value = String(state.lead);
+    $('sound').checked = state.sound; $('vibrate').checked = state.vibrate; $('smartDir').checked = state.smartDir; $('liveOn').checked = state.live;
+    $('plan-arrive').setAttribute('aria-pressed', String(state.planMode === 'arrive'));
+    $('plan-depart').setAttribute('aria-pressed', String(state.planMode === 'depart'));
+    if ($('planTime').value !== state.planTime) $('planTime').value = state.planTime;
+    $('planTimeLabel').textContent = state.planMode === 'arrive' ? 'Arrive at ' + stopTitle(dir.stops[a]) + ' by' : 'Leave after';
+    $('persistNote').textContent = store.persistent ? 'Your settings are saved on this device.' : "Settings can't be saved in this view, so they reset when the app reloads. Open the file directly in your phone or desktop browser to keep them.";
+  }
+  let lastRouteAt = 0;
+  function tick(force) {
+    const now = Date.now();
+    renderClock(now);
+    processAlerts(now);
+    const m = computeModel(now);
+    setHtml('live', liveHtml(m));
+    setHtml('helpCard', helpHtml(m));
+    if (state.tab === 'route' && (force || now - lastRouteAt >= 5000)) { setHtml('routeHead', routeHeadHtml(m)); setHtml('routeView', routeHtml(m)); mapSync(m); lastRouteAt = now; }
+    if (state.tab === 'timetable') setHtml('ttView', timetableHtml(m));
+    if (state.tab === 'plan') setHtml('planResult', planHtml(m));
+    if ($('alertsSheet').classList.contains('open')) setHtml('alertsList', alertsListHtml());
+    updateBadge();
+    updateCountdowns(now);
+    announce(m);
+  }
+  function refresh() { renderStatic(); tick(true); }
+
+  /* ---------- Interaction ---------- */
+  let toastTimer = null;
+  function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3400); }
+  let lastFocus = null;
+  function openOverlay(id) {
+    const o = $(id);
+    if (!o.classList.contains('open')) lastFocus = document.activeElement;
+    o.classList.add('open'); o.setAttribute('aria-hidden', 'false');
+    const f = o.querySelector('[data-action="close"],[data-action="dismiss-alarm"]');
+    if (f && f.focus) { try { f.focus(); } catch (e) { /* ignore */ } }
+  }
+  function closeOverlay(id) {
+    const o = $(id);
+    if (!o || !o.classList.contains('open')) return;
+    o.classList.remove('open'); o.setAttribute('aria-hidden', 'true');
+    if (lastFocus && lastFocus.focus) { try { lastFocus.focus(); } catch (e) { /* ignore */ } }
+  }
+  function dismissAlarm() { stopAlarmSound(); try { if (navigator.vibrate) navigator.vibrate(0); } catch (e) { /* ignore */ } closeOverlay('alarm'); }
+  function testAlarm() {
+    const now = Date.now(), m = computeModel(now);
+    const t = m.mode === 'today' ? { depMs: m.hero.depMs, leaveMs: m.hero.leaveMs } : { depMs: now + 12 * MIN, leaveMs: now + 4 * MIN };
+    closeOverlay('settingsSheet');
+    fireAlarm({ dirId: state.dirId, b: state.board[state.dirId] }, t, now, true);
+  }
+  function setTab(tab) {
+    if (TABS.indexOf(tab) < 0) return;
+    state.tab = tab;
+    TABS.forEach(x => { $('tab-' + x).hidden = x !== tab; $('nav-' + x).setAttribute('aria-selected', String(x === tab)); });
+    tick(true);
+    if (tab === 'route' && lmap) lmap.invalidateSize();
+    try { window.scrollTo(0, 0); } catch (e) { /* ignore */ }
+  }
+  function equivStop(fromDir, k, toDir) { // the same stop (or the nearest one) on the opposite direction
+    const j = toDir.stops.indexOf(fromDir.stops[k]);
+    if (j >= 0) return j;
+    const target = 1 - fromDir.offsets[k] / fromDir.offsets[lastIdx(fromDir)], tl = toDir.offsets[lastIdx(toDir)];
+    let best = 0, bestD = Infinity;
+    toDir.offsets.forEach((o, x) => { const dd = Math.abs(o / tl - target); if (dd < bestD) { bestD = dd; best = x; } });
+    return best;
+  }
+  function setDir(id) {
+    if (!DIRS[id] || id === state.dirId) return;
+    const from = DIRS[state.dirId], to = DIRS[id];
+    let nb = equivStop(from, state.alight[from.id], to), na = equivStop(from, state.board[from.id], to);
+    if (!(nb < na) || nb > lastIdx(to) - 1) { nb = 0; na = lastIdx(to); }
+    state.board[to.id] = nb; state.alight[to.id] = na; state.dirId = id;
+    persist(); refresh();
+  }
+
+  document.addEventListener('click', ev => {
+    unlockAudio();
+    const t = ev.target;
+    if (t && t.classList && t.classList.contains('overlay') && t.id !== 'alarm') { closeOverlay(t.id); return; }
+    const el = t && t.closest ? t.closest('[data-action]') : null;
+    if (!el) return;
+    const d = el.dataset;
+    switch (d.action) {
+      case 'tab': setTab(d.tab); break;
+      case 'dir': setDir(d.dir); break;
+      case 'alert': toggleAlert(d.dir, Number(d.b), Number(d.i), Number(d.ds)); break;
+      case 'cancel-alert': state.alerts = state.alerts.filter(al => al.key !== d.key); keepAwake(); toast('Alert cancelled'); tick(true); break;
+      case 'delay': state.delay = clampInt(d.v, 0, 60, 0); refresh(); toast(state.delay ? 'Showing times ' + state.delay + ' min later than scheduled' : 'Back to scheduled times'); break;
+      case 'plan-mode': state.planMode = d.mode === 'depart' ? 'depart' : 'arrive'; refresh(); break;
+      case 'settings': closeOverlay('alertsSheet'); openOverlay('settingsSheet'); break;
+      case 'alerts': setHtml('alertsList', alertsListHtml()); updateCountdowns(Date.now()); openOverlay('alertsSheet'); break;
+      case 'close': { const o = el.closest('.overlay'); if (o) closeOverlay(o.id); break; }
+      case 'dismiss-alarm': dismissAlarm(); break;
+      case 'test-alarm': testAlarm(); break;
+      case 'map-fit': fitTrip(computeModel(Date.now())); break;
+      case 'map-mybus': {
+        const m = computeModel(Date.now()), b = m.mode === 'today' && m.hero.live ? m.hero.live.bus : null;
+        if (b && lmap) lmap.setView(b.ll, Math.max(lmap.getZoom(), 15)); else toast(m.liveOn ? "Live GPS can't see your bus yet" : 'Live GPS isn\'t available right now');
+        break;
+      }
+      case 'map-size': {
+        const c = $('mapCard'), tall = c.classList.toggle('tall');
+        el.setAttribute('aria-label', tall ? 'Make the map smaller' : 'Make the map bigger');
+        el.innerHTML = tall ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>';
+        if (lmap) { lmap.invalidateSize(); fitTrip(computeModel(Date.now())); }
+        break;
+      }
+      default: break;
+    }
+  });
+  document.addEventListener('change', ev => {
+    const t = ev.target, dir = DIRS[state.dirId];
+    if (!t) return;
+    switch (t.id) {
+      case 'boardSel': { const b = clampInt(t.value, 0, lastIdx(dir) - 1, 0); state.board[dir.id] = b; if (state.alight[dir.id] <= b) state.alight[dir.id] = lastIdx(dir); persist(); refresh(); break; }
+      case 'alightSel': { const a = clampInt(t.value, 1, lastIdx(dir), lastIdx(dir)); if (a > state.board[dir.id]) state.alight[dir.id] = a; persist(); refresh(); break; }
+      case 'lead': state.lead = clampInt(t.value, 0, 10, 2); persist(); tick(true); break;
+      case 'sound': state.sound = !!t.checked; if (!state.sound) stopAlarmSound(); else unlockAudio(); persist(); break;
+      case 'vibrate': state.vibrate = !!t.checked; persist(); break;
+      case 'smartDir': state.smartDir = !!t.checked; persist(); break;
+      case 'liveOn': state.live = !!t.checked; persist(); pollLive(); tick(true); break;
+      case 'planTime': state.planTime = t.value || state.planTime; tick(true); break;
+      default: break;
+    }
+  });
+  document.addEventListener('input', ev => {
+    const t = ev.target;
+    if (!t) return;
+    if (t.id === 'walk' || t.id === 'buffer') {
+      state[t.id] = clampInt(t.value, 0, t.id === 'walk' ? 30 : 10, state[t.id]);
+      $(t.id + 'Out').textContent = state[t.id] + ' min';
+      persist(); tick(true);
+    } else if (t.id === 'planTime' && t.value) { state.planTime = t.value; tick(true); }
+  });
+  document.addEventListener('keydown', ev => {
+    if (ev.key !== 'Escape') return;
+    if ($('alarm').classList.contains('open')) dismissAlarm();
+    else { closeOverlay('settingsSheet'); closeOverlay('alertsSheet'); }
+  });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { keepAwake(); pollLive(); tick(true); } });
+
+  window.S5Tracker = { DIRS, state, computeModel, buildTrips, busesOnRoad, dayInfo, holidays, fmtDur, hhmm, tick, live, OSM_D, LOOP_M, pollLive };
+  renderStatic();
+  setTab('live');
+  setInterval(tick, 1000);
+  pollLive();
+  setInterval(pollLive, POLL_MS);
+  // Leaflet loads after this script; draw the map once it is ready.
+  window.addEventListener('load', () => { if (state.tab === 'route') tick(true); });
 })();
-
-syncAlertBtn();
-placeMe();
-startPolling();
 </script>
 </body>
 </html>
