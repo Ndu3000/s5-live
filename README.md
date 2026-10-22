@@ -22,7 +22,9 @@ How live GPS works:
   can't see a bus. "Arrive by" plans pick a bus that typically makes it.
 - Live traffic: `relay/s5-traffic/index.ts` (Supabase Edge Function, needs the `TOMTOM_API_KEY` secret) asks
   TomTom for the current driving time of every stretch, cached for 2 minutes. The app trusts it for the next
-  15 minutes, blends back to typical traffic over the following 45, and names slow stretches. Without the
-  key, the app uses typical traffic.
+  15 minutes, blends back to typical traffic over the following 45, and names slow stretches.
+- Without a TomTom key, Gautrain's own buses are the traffic sensors: each S5 bus's progress over the last 3-6
+  minutes, against what the timetable expects in typical traffic, sets a live factor for the stretches it drove
+  (kept for 15 minutes).
 - The route line and stop positions come from OpenStreetMap route relation 3281475, and the map tiles are
   OpenStreetMap's (© OpenStreetMap contributors, ODbL).
