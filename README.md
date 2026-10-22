@@ -23,6 +23,10 @@ How live GPS works:
 - Live traffic: `relay/s5-traffic/index.ts` (Supabase Edge Function, needs the `TOMTOM_API_KEY` secret) asks
   TomTom for the current driving time of every stretch, cached for 2 minutes. The app trusts it for the next
   15 minutes, blends back to typical traffic over the following 45, and names slow stretches.
+- Backup routes: if the Edge Functions are unavailable, the app calls database functions on the same Supabase
+  project through its REST API (`supabase/backup-relays.sql`). The TomTom key can be stored either as the
+  `TOMTOM_API_KEY` Edge Function secret or in Supabase Vault as `tomtom_api_key`. A scheduled GitHub workflow
+  calls the project every two days so Supabase doesn't pause it for inactivity.
 - Without a TomTom key, Gautrain's own buses are the traffic sensors: each S5 bus's progress over the last 3-6
   minutes, against what the timetable expects in typical traffic, sets a live factor for the stretches it drove
   (kept for 15 minutes).

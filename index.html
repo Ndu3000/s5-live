@@ -680,7 +680,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
      for 2 minutes). It is trusted for the next 15 minutes and fades back to typical traffic over the following 45. */
   const TRAFFIC_URL = 'https://gkzuuwohldqbsnzmhdmx.supabase.co/functions/v1/s5-traffic';
   const TRAFFIC_POLL_MS = 2 * MIN, TRAFFIC_FRESH_MS = 8 * MIN;
-  const liveTraffic = { at: 0, asked: 0, R: null, sec: null, err: '' };
+  const liveTraffic = { at: 0, asked: 0, R: null, sec: null, err: '', via: 'edge' };
   const trafficFresh = now => !!liveTraffic.R && now - liveTraffic.at < TRAFFIC_FRESH_MS;
   /* Without a TomTom key, Gautrain's own buses are the traffic sensors: each S5 bus's progress over the last few
      minutes, against what the timetable expects in typical traffic, gives a factor for the stretches it drove. */
@@ -752,7 +752,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   const FEED_BOX = { east: '28.1', south: '-26.15', north: '-25.97', west: '27.94' };
   const POLL_MS = 10000, FRESH_MS = 45000, GPS_OLD_MS = 3 * MIN;
   const ON_ROUTE_M = 60, TERMINAL_M = 150, SANDTON_SHARED_M = 700; // other Gautrain routes share the roads next to Sandton Station
-  const live = { ok: 0, err: '', fetching: false, buses: new Map(), trips: { toSandton: {}, toMontecasino: {} } };
+  const live = { ok: 0, err: '', via: 'edge', fetching: false, buses: new Map(), trips: { toSandton: {}, toMontecasino: {} } };
   const serviceSpan = (() => {
     const ends = Object.keys(DIRS).map(id => { const d = DIRS[id]; return [d.starts[0], d.starts[d.starts.length - 1] + d.offsets[lastIdx(d)]]; });
     return [Math.min(...ends.map(e => e[0])) - 20, Math.max(...ends.map(e => e[1])) + 20];
@@ -762,13 +762,35 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     return state.live && dayInfo(ds).service && t >= serviceSpan[0] && t <= serviceSpan[1];
   }
   const liveFresh = now => live.ok > 0 && now - live.ok < FRESH_MS;
+  /* Each feed has two routes: the Edge Function relay, and a database function on the same Supabase project
+     (public.s5_buses / public.s5_traffic) for when Edge Functions are down. The route that last worked goes first. */
+  const RPC = 'https://gkzuuwohldqbsnzmhdmx.supabase.co/rest/v1/rpc/';
+  async function fetchVia(routes, preferred, signal) {
+    const order = routes.slice().sort((p, q) => (q.name === preferred) - (p.name === preferred));
+    let lastErr = null;
+    for (const r of order) {
+      try {
+        const res = await fetch(r.url, {
+          method: r.body == null ? 'GET' : 'POST', cache: 'no-store', signal, body: r.body,
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + FEED_KEY, apikey: FEED_KEY }
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data) throw new Error(data && (data.error || data.message) ? data.error || data.message : 'HTTP ' + res.status);
+        return { data, via: r.name };
+      } catch (e) {
+        if (e && e.name === 'AbortError') throw e;
+        lastErr = e;
+      }
+    }
+    throw lastErr;
+  }
   async function pollTraffic(now) {
     if (now - liveTraffic.asked < TRAFFIC_POLL_MS) return;
     liveTraffic.asked = now;
     try {
-      const res = await fetch(TRAFFIC_URL, { cache: 'no-store', headers: { Authorization: 'Bearer ' + FEED_KEY, apikey: FEED_KEY } });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data) throw new Error(data && data.error ? data.error : 'HTTP ' + res.status);
+      const got = await fetchVia([{ name: 'edge', url: TRAFFIC_URL }, { name: 'db', url: RPC + 's5_traffic', body: '{}' }], liveTraffic.via);
+      const data = got.data;
+      liveTraffic.via = got.via;
       const R = {}, sec = {};
       Object.keys(DIRS).forEach(id => {
         const legs = data[id] && data[id].live;
@@ -778,7 +800,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       });
       liveTraffic.R = R; liveTraffic.sec = sec; liveTraffic.at = Math.min(now, Number(data.at) || now); liveTraffic.err = '';
     } catch (e) {
-      liveTraffic.err = e && e.message ? e.message : 'unavailable';
+      liveTraffic.err = e && /key/i.test(e.message || '') ? 'no TomTom key yet' : e && e.message ? e.message : 'unavailable';
     }
     tick(true);
   }
@@ -791,12 +813,9 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     const ctl = typeof AbortController === 'function' ? new AbortController() : null;
     const timer = setTimeout(() => { if (ctl) ctl.abort(); }, 12000);
     try {
-      const res = await fetch(FEED_URL, {
-        method: 'POST', cache: 'no-store', signal: ctl ? ctl.signal : undefined, body: JSON.stringify(FEED_BOX),
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + FEED_KEY, apikey: FEED_KEY }
-      });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const data = await res.json();
+      const got = await fetchVia([{ name: 'edge', url: FEED_URL, body: JSON.stringify(FEED_BOX) }, { name: 'db', url: RPC + 's5_buses', body: '{}' }], live.via, ctl ? ctl.signal : undefined);
+      const data = got.data;
+      live.via = got.via;
       const list = data && data.Result && data.Result.busPositions;
       if (!Array.isArray(list)) throw new Error('unexpected answer');
       ingestLive(list, Date.now());

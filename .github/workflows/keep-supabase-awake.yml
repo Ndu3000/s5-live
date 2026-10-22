@@ -1,0 +1,20 @@
+# Supabase pauses free projects after a week without requests. This calls the S5 Bus Tracker's
+# backup bus relay (a public, read-only database function) every two days so the project stays awake.
+name: Keep Supabase awake
+on:
+  schedule:
+    - cron: "17 3 */2 * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the S5 bus relay
+        env:
+          # Public anon key, the same one the web page uses; it can only call the relays.
+          ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdrenV1d29obGRxYnNuem1oZG14Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2OTA0MzcsImV4cCI6MjEwODI2NjQzN30.L5Ze3IO4dp6psKOC_KBCA7ScT5hj7J0ej9rLLsnOc8k
+        run: |
+          curl --fail --silent --show-error --max-time 30 \
+            -X POST "https://gkzuuwohldqbsnzmhdmx.supabase.co/rest/v1/rpc/s5_buses" \
+            -H "apikey: $ANON_KEY" -H "Authorization: Bearer $ANON_KEY" -H "Content-Type: application/json" -d '{}' \
+            | head -c 200
