@@ -1093,7 +1093,9 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   // Driving minutes between home and the S5 stop at Montecasino (TomTom, typical weekday traffic), by time of day.
   const RIDE_TO_MONTE = [[360, 10.2], [390, 10.6], [420, 11.1], [450, 11.6], [480, 11.7]];
   const RIDE_HOME = [[990, 14.7], [1020, 14.8], [1050, 14.5], [1080, 13.8], [1140, 11.8]];
-  const RIDE_EXTRA = 2, DRIVER_ETA = 6, SANDTON_TRANSFER = 6, PLATFORM_WALK = 2;
+  // Every drop-off is followed by at least a 5-minute walk: ride → bus stop, bus → platform, train → exit, ride pickup point.
+  const MIN_WALK = 5;
+  const RIDE_EXTRA = 2, DRIVER_ETA = 6, SANDTON_TRANSFER = Math.max(6, MIN_WALK), PLATFORM_WALK = MIN_WALK;
   const inSA = (lat, lon) => lat < -21 && lat > -35.5 && lon > 15 && lon < 33.5;
   const MONTE_STOP = { lat: -26.02466, lon: 28.0114, name: 'Montecasino (Gautrain bus stop, Palazzo Circle)' };
   // Rough Johannesburg sunset by month, for after-dark advice.
@@ -1119,11 +1121,11 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     for (let i = 0; i < dir.starts.length && out.length < 2; i++) {
       const busDep = ds + (dir.starts[i] + state.delay) * MIN, atStop = busDep - state.buffer * MIN;
       const ride = interp(RIDE_TO_MONTE, (atStop - ds) / MIN - 12) + RIDE_EXTRA;
-      const pickup = atStop - ride * MIN, bookBy = pickup - DRIVER_ETA * MIN;
+      const dropOff = atStop - MIN_WALK * MIN, pickup = dropOff - ride * MIN, bookBy = pickup - DRIVER_ETA * MIN;
       if (bookBy < from - 30000) continue;
       const sand = s5At('toSandton', i, last, ds, from);
       const train = trainAfter(TRAINS.north, sand.ms + SANDTON_TRANSFER * MIN, ds);
-      if (train) out.push({ i, busDep, atStop, pickup, bookBy, ride, sand, train });
+      if (train) out.push({ i, busDep, atStop, dropOff, pickup, bookBy, ride, sand, train, door: train.arr + MIN_WALK * MIN });
     }
     return out;
   }
@@ -1136,7 +1138,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       const i = dir.starts.findIndex(st => ds + (st + state.delay) * MIN >= sandArr + SANDTON_TRANSFER * MIN);
       if (i < 0) break;
       const mon = s5At('toMontecasino', i, last, ds, from), ride = interp(RIDE_HOME, (mon.ms - ds) / MIN) + RIDE_EXTRA;
-      out.push({ trainDep: ds + d * MIN, sandArr, i, busDep: ds + (dir.starts[i] + state.delay) * MIN, mon, bookBy: mon.ms - DRIVER_ETA * MIN, home: mon.ms + ride * MIN, ride });
+      out.push({ trainDep: ds + d * MIN, sandArr, i, busDep: ds + (dir.starts[i] + state.delay) * MIN, mon, bookBy: mon.ms + (MIN_WALK - DRIVER_ETA) * MIN, home: mon.ms + (MIN_WALK + ride) * MIN, ride });
     }
     return out;
   }
@@ -1309,11 +1311,11 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       const cd = soon ? '<span data-to="' + p.bookBy + '"></span>' : '';
       head = '<div class="cm-next' + (soon && p.bookBy - now < 2 * MIN ? ' go' : '') + '"><div class="big">Book your ride by ' + hhmmMs(p.bookBy) + '</div><div class="cd">' + cd + '</div></div>';
       steps = [
-        ['', p.pickup, 'Ride from home', 'Uber/Bolt · about ' + Math.round(p.ride) + ' min · drivers are usually ~' + DRIVER_ETA + ' min away when you book'],
-        ['bus-step', p.busDep, 'S5 from Montecasino', 'be at the bus stop (Palazzo Circle) by ' + hhmmMs(p.atStop)],
-        ['', p.sand.ms, 'Sandton Station' + tagLive(p.sand), (p.sand.live ? 'live GPS' : 'in today\'s traffic') + ' · about ' + SANDTON_TRANSFER + ' min from the bus to the platform'],
+        ['', p.pickup, 'Ride from home', 'Uber/Bolt · about ' + Math.round(p.ride) + ' min, drop-off by ' + hhmmMs(p.dropOff) + ' · drivers are usually ~' + DRIVER_ETA + ' min away when you book'],
+        ['bus-step', p.busDep, 'S5 from Montecasino', '~' + MIN_WALK + ' min walk from the drop-off · be at the bus stop (Palazzo Circle) by ' + hhmmMs(p.atStop)],
+        ['', p.sand.ms, 'Sandton Station' + tagLive(p.sand), (p.sand.live ? 'live GPS' : 'in today\'s traffic') + ' · ~' + SANDTON_TRANSFER + ' min walk from the bus to the platform'],
         ['train-step', p.train.dep, 'Gautrain to Midrand', 'every 10 min until 08:37, then every 20 min'],
-        ['end-step', p.train.arr, 'Midrand', 'door to door about ' + Math.round((p.train.arr - p.pickup) / MIN + DRIVER_ETA) + ' min from booking']
+        ['end-step', p.train.arr, 'Midrand', '~' + MIN_WALK + ' min walk out of the station · door to door about ' + Math.round((p.door - p.bookBy) / MIN) + ' min from booking']
       ];
       actions = soon ? '<button class="btn ' + (remindOn(p.bookBy) ? 'armed' : 'primary') + '" data-action="remind" data-at="' + p.bookBy + '" data-what="am">' + ICON.bell + '<span>' + (remindOn(p.bookBy) ? 'Reminder set' : 'Remind me to book') + '</span></button>' +
         '<a class="btn" href="' + esc(uberLink(MONTE_STOP, MONTE_STOP.name)) + '" target="_blank" rel="noopener">' + ICON.pin + '<span>Open Uber</span></a>' : '';
@@ -1322,15 +1324,15 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       const sunset = m.todayStart + SUNSET[new Date(now + SAST).getUTCMonth()] * MIN;
       head = '<div class="cm-next"><div class="big">Catch the ' + trainHhmm(p.trainDep) + ' train at Midrand</div><div class="cd"><span data-to="' + p.trainDep + '"></span></div></div>';
       steps = [
-        ['train-step', p.trainDep, 'Gautrain to Sandton', 'from Midrand · arrives ' + hhmmMs(p.sandArr)],
-        ['bus-step', p.busDep, 'S5 from Sandton Station', 'about ' + SANDTON_TRANSFER + ' min from the platform to the bus'],
-        ['', p.mon.ms, 'Montecasino' + tagLive(p.mon), 'book your ride at ~' + hhmmMs(p.bookBy) + ', while you\'re still on the bus, so the driver is there when you get off'],
+        ['train-step', p.trainDep, 'Gautrain to Sandton', 'from Midrand · allow ~' + PLATFORM_WALK + ' min to reach the platform · arrives ' + hhmmMs(p.sandArr)],
+        ['bus-step', p.busDep, 'S5 from Sandton Station', '~' + SANDTON_TRANSFER + ' min walk from the platform to the bus'],
+        ['', p.mon.ms, 'Montecasino' + tagLive(p.mon), 'book your ride at ~' + hhmmMs(p.bookBy) + ', as the bus pulls in, then ~' + MIN_WALK + ' min walk to the pickup point'],
         ['end-step', p.home, 'Home', 'ride about ' + Math.round(p.ride) + ' min']
       ];
       const homeTo = state.home ? uberLink(state.home, 'Home') : null;
       actions = '<button class="btn ' + (remindOn(p.bookBy) ? 'armed' : 'primary') + '" data-action="remind" data-at="' + p.bookBy + '" data-what="pm">' + ICON.bell + '<span>' + (remindOn(p.bookBy) ? 'Reminder set' : 'Remind me to book') + '</span></button>' +
         (homeTo ? '<a class="btn" href="' + esc(homeTo) + '" target="_blank" rel="noopener">' + ICON.pin + '<span>Open Uber</span></a>' : '<button class="btn" data-action="home-here">' + ICON.pin + '<span>Set home to here</span></button>');
-      if (p.mon.ms > sunset) notes.push('It\'ll be dark when you reach Montecasino: book before you get off, and wait in a well-lit spot by the bus stop until your driver arrives.');
+      if (p.mon.ms > sunset) notes.push('It\'ll be dark when you reach Montecasino: book before you get off, and wait in a well-lit spot at the pickup point until your driver arrives.');
       const lc = lastConnection(m.todayStart);
       if (lc) notes.push('Last connection home: the <b>' + trainHhmm(lc.train) + '</b> train from Midrand makes the last S5 (' + hhmmMs(lc.bus) + ').');
     }
