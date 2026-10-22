@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111418">
+<title>S5 Live Buses</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #15181c; --muted: #5f6670; --line: #e3e1da;
+    --gold: #b8860b; --gold-soft: #f6ecd2; --ok: #1f7a46; --ok-soft: #e2f3e8;
+    --warn: #a35a00; --warn-soft: #fbead2; --bad: #b42318; --bad-soft: #fde4e1;
+    --bus: #c8102e; --bus-other: #6b7280; --me: #1d4ed8;
+    --shadow: 0 6px 24px rgba(0,0,0,.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1215; --panel: #181c21; --ink: #eef0f2; --muted: #9aa3ad; --line: #2a3038;
+      --gold: #e0b44a; --gold-soft: #3a3020; --ok: #4ade80; --ok-soft: #173325;
+      --warn: #fbbf24; --warn-soft: #3b2e12; --bad: #f87171; --bad-soft: #3d1a1a;
+      --bus: #ff4d5e; --bus-other: #8b949e; --me: #60a5fa; --shadow: 0 6px 24px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1215; --panel: #181c21; --ink: #eef0f2; --muted: #9aa3ad; --line: #2a3038;
+    --gold: #e0b44a; --gold-soft: #3a3020; --ok: #4ade80; --ok-soft: #173325;
+    --warn: #fbbf24; --warn-soft: #3b2e12; --bad: #f87171; --bad-soft: #3d1a1a;
+    --bus: #ff4d5e; --bus-other: #8b949e; --me: #60a5fa; --shadow: 0 6px 24px rgba(0,0,0,.5);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+    padding-top: max(10px, env(safe-area-inset-top));
+    background: var(--panel); border-bottom: 1px solid var(--line); z-index: 1000;
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 700; letter-spacing: -.01em; }
+  header h1 b { color: var(--gold); }
+  header h1 small { display: block; font-size: 12px; font-weight: 500; color: var(--muted); }
+  .pill {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+    background: var(--line); color: var(--muted); white-space: nowrap;
+  }
+  .pill i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .pill.live { background: var(--ok-soft); color: var(--ok); }
+  .pill.live i { animation: pulse 1.6s infinite; }
+  .pill.err { background: var(--bad-soft); color: var(--bad); }
+  @keyframes pulse { 50% { opacity: .25; } }
+  .iconbtn {
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    border-radius: 10px; width: 36px; height: 36px; font-size: 18px; cursor: pointer;
+  }
+  #map { flex: 1; min-height: 0; background: var(--bg); }
+  .sheet {
+    background: var(--panel); border-top: 1px solid var(--line); box-shadow: var(--shadow);
+    padding: 12px 16px; padding-bottom: max(12px, env(safe-area-inset-bottom));
+    max-height: 48vh; overflow-y: auto; z-index: 1000;
+  }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row + .row { margin-top: 10px; }
+  label.small { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  select, input[type=number], input[type=url], input[type=text] {
+    font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 10px; padding: 7px 10px; min-width: 0;
+  }
+  input[type=number] { width: 68px; }
+  button.btn {
+    font: inherit; font-weight: 600; border-radius: 10px; padding: 8px 12px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  }
+  button.btn.primary { background: var(--gold); border-color: var(--gold); color: #111; }
+  button.btn.on { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+  .banner {
+    border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; font-size: 14px;
+    background: var(--gold-soft); color: var(--ink);
+  }
+  .banner.err { background: var(--bad-soft); }
+  .banner.alarm { background: var(--bad); color: #fff; font-weight: 700; font-size: 16px; }
+  .banner[hidden] { display: none; }
+  .list { margin-top: 10px; display: grid; gap: 8px; }
+  .bus {
+    display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center;
+    border: 1px solid var(--line); border-radius: 12px; padding: 9px 10px; cursor: pointer;
+  }
+  .bus.watch { border-color: var(--gold); background: var(--gold-soft); }
+  .bus .tag {
+    font-weight: 800; font-size: 12px; color: #fff; background: var(--bus);
+    border-radius: 8px; padding: 4px 6px; min-width: 38px; text-align: center;
+  }
+  .bus .tag.other { background: var(--bus-other); }
+  .bus .eta { text-align: right; font-weight: 800; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .bus .eta small { display: block; font-weight: 500; font-size: 11.5px; color: var(--muted); }
+  .bus .meta { font-size: 12.5px; color: var(--muted); }
+  .bus .meta b { color: var(--ink); font-weight: 600; }
+  .away { color: var(--muted) !important; }
+  .near { color: var(--warn) !important; }
+  .now { color: var(--bad) !important; }
+  .muted { color: var(--muted); font-size: 13px; }
+  dialog {
+    border: none; border-radius: 16px; padding: 0; width: min(560px, calc(100vw - 32px));
+    background: var(--panel); color: var(--ink); box-shadow: var(--shadow);
+  }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog .in { padding: 16px; display: grid; gap: 12px; max-height: 80vh; overflow-y: auto; }
+  dialog h2 { margin: 0; font-size: 17px; }
+  dialog .f { display: grid; gap: 4px; }
+  dialog .f input { width: 100%; }
+  pre.raw {
+    margin: 0; padding: 10px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line);
+    font-size: 11.5px; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-all;
+  }
+  .busicon { position: relative; }
+  .busicon .dot {
+    width: 30px; height: 30px; border-radius: 50%; background: var(--bus); color: #fff;
+    border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.35);
+    display: grid; place-items: center; font: 800 10px system-ui, sans-serif;
+  }
+  .busicon.other .dot { background: var(--bus-other); }
+  .busicon.stale .dot { opacity: .45; }
+  .busicon.watch .dot { outline: 3px solid var(--gold); outline-offset: 1px; }
+  .busicon .arrow {
+    position: absolute; left: 50%; top: 50%; width: 0; height: 0; margin: -25px 0 0 -6px;
+    border-left: 6px solid transparent; border-right: 6px solid transparent;
+    border-bottom: 9px solid var(--bus); transform-origin: 6px 25px;
+  }
+  .busicon.other .arrow { border-bottom-color: var(--bus-other); }
+  .meicon {
+    width: 22px; height: 22px; border-radius: 50%; background: var(--me);
+    border: 3px solid #fff; box-shadow: 0 0 0 6px color-mix(in srgb, var(--me) 30%, transparent);
+  }
+  .leaflet-container { font: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <h1><b>S5</b> Live <small>Montecasino ⇄ Sandton</small></h1>
+  <span id="status" class="pill"><i></i><span>Starting…</span></span>
+  <button class="iconbtn" id="openSettings" title="Feed settings" aria-label="Feed settings">⚙</button>
+</header>
+
+<div id="map"></div>
+
+<section class="sheet">
+  <div id="alarm" class="banner alarm" hidden></div>
+  <div id="feedMsg" class="banner err" hidden></div>
+
+  <div class="row">
+    <label class="small" for="stop">My stop</label>
+    <select id="stop">
+      <option value="sandton">Sandton Station</option>
+      <option value="monte">Montecasino</option>
+      <option value="custom">Pin on map (tap map to move)</option>
+    </select>
+    <button class="btn" id="locate" title="Put my stop where I am">📍 Here</button>
+  </div>
+  <div class="row">
+    <label class="small" for="lead">Alert me when a bus is</label>
+    <input type="number" id="lead" min="1" max="60" value="10"> <span class="muted">min away</span>
+    <button class="btn" id="alertsBtn">🔔 Turn on alerts</button>
+  </div>
+
+  <div class="list" id="list"></div>
+  <p class="muted" id="foot" style="margin:10px 0 0"></p>
+</section>
+
+<dialog id="settings">
+  <form method="dialog" class="in">
+    <h2>Live feed</h2>
+    <p class="muted" style="margin:0">
+      Bus positions come from Gautrain's bus-location feed, through a small relay (Supabase project
+      gautrain-s5-live) because Gautrain's server doesn't let web pages read it directly.
+    </p>
+    <div class="f">
+      <label class="small" for="feedUrl">Feed or relay address</label>
+      <input type="url" id="feedUrl" spellcheck="false">
+    </div>
+    <div class="f">
+      <label class="small" for="feedKey">Relay key (optional; sent as Authorization: Bearer and apikey)</label>
+      <input type="text" id="feedKey" spellcheck="false" autocomplete="off">
+    </div>
+    <div class="row">
+      <label class="small" for="every">Refresh every</label>
+      <input type="number" id="every" min="5" max="120" value="10"> <span class="muted">s</span>
+      <label class="small"><input type="checkbox" id="showAll"> Show other routes</label>
+    </div>
+    <div class="f">
+      <span class="small">Last feed response (send me this if buses don't show)</span>
+      <pre class="raw" id="raw">Nothing received yet.</pre>
+    </div>
+    <div class="row">
+      <button class="btn" type="button" id="copyRaw">Copy response</button>
+      <button class="btn" type="button" id="resetFeed">Reset to default relay</button>
+      <button class="btn primary" value="save" style="margin-left:auto">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+
+// ---------- config ----------
+const GAUTRAIN_FEED = "https://api.gautrain.co.za/transport-api/api/0/busses/location";
+// Gautrain's feed sends no CORS headers, so browsers read it through this relay (relay/gautrain-bus).
+const DEFAULT_FEED = "https://gkzuuwohldqbsnzmhdmx.supabase.co/functions/v1/gautrain-bus";
+// Public anon key of that Supabase project; it only lets the page call the relay.
+const DEFAULT_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdrenV1d29obGRxYnNuem1oZG14Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2OTA0MzcsImV4cCI6MjEwODI2NjQzN30.L5Ze3IO4dp6psKOC_KBCA7ScT5hj7J0ej9rLLsnOc8k";
+// Area requested from the feed: Fourways/Montecasino down to Sandton, with margin. The east edge
+// stops short of the bus depot near 28.12°E, where dozens of parked buses report all night.
+const BOX = { west: 27.94, south: -26.15, east: 28.10, north: -25.97 };
+// Stop pins are approximate; drag the pin or pick "Pin on map" to set your exact stop.
+const STOPS = {
+  sandton: { name: "Sandton Station", ll: [-26.1077, 28.0571] },
+  monte:   { name: "Montecasino",     ll: [-26.0249, 28.0118] },
+};
+const ROUTE_MATCH = /\bS\s*-?\s*5\b|monte\s*casino|montecasino/i;
+const ROAD_FACTOR = 1.35;      // straight-line → road distance
+const DEFAULT_KMH = 22;        // typical urban bus speed when the feed has none
+const STALE_MS = 3 * 60 * 1000;
+const REALERT_MS = 15 * 60 * 1000;
+
+// ---------- storage (best effort) ----------
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("s5live." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("s5live." + k, JSON.stringify(v)); } catch {} },
+};
+const cfg = {
+  feedUrl: store.get("feedUrl", DEFAULT_FEED),
+  feedKey: store.get("feedKey", DEFAULT_KEY),
+  every: store.get("every", 10),
+  showAll: store.get("showAll", false),
+  stop: store.get("stop", new Date().getHours() < 12 ? "monte" : "sandton"),
+  custom: store.get("custom", null),
+  lead: store.get("lead", 10),
+};
+if (cfg.feedUrl === GAUTRAIN_FEED) { cfg.feedUrl = DEFAULT_FEED; cfg.feedKey = DEFAULT_KEY; }
+
+// ---------- feed parsing ----------
+// The feed's format isn't documented, so find anything that looks like a vehicle with coordinates.
+const KEYS = {
+  lat: ["lat", "latitude", "y", "gpslat", "gps_lat"],
+  lon: ["lon", "lng", "long", "longitude", "x", "gpslon", "gpslng", "gps_lon", "gps_lng"],
+  id: ["id", "busid", "bus_id", "vehicleid", "vehicle_id", "vehicleno", "unitid", "unit_id", "registration",
+       "regno", "registrationnumber", "fleetno", "fleetnumber", "fleet_number", "busnumber", "bus_number", "name", "label", "code"],
+  route: ["route", "routename", "route_name", "routecode", "route_code", "routeid", "route_id", "routenumber",
+          "line", "linename", "service", "routedescription", "description", "trip", "tripname", "destination"],
+  heading: ["heading", "bearing", "direction", "course", "angle", "dir", "azimuth"],
+  speed: ["speed", "velocity", "kmh", "speedkmh", "speed_kmh"],
+  time: ["lastmodified", "timestamp", "time", "datetime", "lastupdate", "last_update", "lastupdated", "gpstime", "gps_time",
+         "date", "updated", "updatedat", "ts", "reporttime", "eventtime"],
+};
+const NESTED = ["position", "location", "coords", "coordinate", "coordinates", "gps", "point", "latlng", "geo"];
+
+function pick(o, names) {
+  for (const k of Object.keys(o)) if (names.includes(k.toLowerCase())) return o[k];
+  return undefined;
+}
+const num = v => (v === null || v === undefined || v === "" ? NaN : Number(v));
+const inSA = (lat, lon) => lat < -21 && lat > -35.5 && lon > 15 && lon < 33.5;
+
+function coordsOf(o) {
+  if (!o || typeof o !== "object") return null;
+  if (Array.isArray(o)) {
+    if (o.length >= 2 && typeof o[0] !== "object") {
+      const a = num(o[0]), b = num(o[1]);
+      if (inSA(b, a)) return [b, a];          // [lon, lat] (GeoJSON order)
+      if (inSA(a, b)) return [a, b];
+    }
+    return null;
+  }
+  if (o.geometry && o.geometry.coordinates) return coordsOf(o.geometry.coordinates);
+  const lat = num(pick(o, KEYS.lat)), lon = num(pick(o, KEYS.lon));
+  if (inSA(lat, lon)) return [lat, lon];
+  if (inSA(lon, lat)) return [lon, lat];      // swapped fields
+  return null;
+}
+
+function parseTime(v) {
+  if (v === undefined || v === null || v === "") return null;
+  if (typeof v === "number" || /^\d+$/.test(String(v))) {
+    const n = Number(v);
+    return n < 1e12 ? n * 1000 : n;
+  }
+  const s = String(v);
+  // Times without a zone are South African time (UTC+2).
+  const t = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : s.replace(" ", "T") + "+02:00");
+  return isNaN(t) ? null : t;
+}
+
+function toVehicle(o, ll) {
+  const props = o.properties && typeof o.properties === "object" ? { ...o, ...o.properties } : o;
+  const idRaw = pick(props, KEYS.id);
+  const routeRaw = pick(props, KEYS.route);
+  const route = routeRaw == null || typeof routeRaw === "object" ? "" : String(routeRaw);
+  const text = Object.values(props).filter(v => typeof v === "string" || typeof v === "number").join(" ");
+  const heading = num(pick(props, KEYS.heading));
+  const speed = num(pick(props, KEYS.speed));
+  return {
+    id: idRaw == null || typeof idRaw === "object" ? null : String(idRaw),
+    route, text, ll,
+    heading: isFinite(heading) ? heading : null,
+    speed: isFinite(speed) ? speed : null,
+    time: parseTime(pick(props, KEYS.time)),
+  };
+}
+
+function extractVehicles(data) {
+  const out = [];
+  (function walk(node, depth) {
+    if (!node || typeof node !== "object" || depth > 8) return;
+    if (Array.isArray(node)) { node.forEach(n => walk(n, depth + 1)); return; }
+    let ll = coordsOf(node);
+    if (!ll) for (const k of Object.keys(node)) {
+      if (NESTED.includes(k.toLowerCase()) && (ll = coordsOf(node[k]))) break;
+    }
+    if (ll) { out.push(toVehicle(node, ll)); return; }
+    for (const v of Object.values(node)) walk(v, depth + 1);
+  })(data, 0);
+  return out;
+}
+
+// ---------- geo ----------
+function distKm(a, b) {
+  const R = 6371, r = Math.PI / 180;
+  const dLat = (b[0] - a[0]) * r, dLon = (b[1] - a[1]) * r;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+function bearing(a, b) {
+  const r = Math.PI / 180;
+  const y = Math.sin((b[1] - a[1]) * r) * Math.cos(b[0] * r);
+  const x = Math.cos(a[0] * r) * Math.sin(b[0] * r) - Math.sin(a[0] * r) * Math.cos(b[0] * r) * Math.cos((b[1] - a[1]) * r);
+  return (Math.atan2(y, x) / r + 360) % 360;
+}
+
+// ---------- map ----------
+const map = L.map("map", { zoomControl: false, attributionControl: true }).fitBounds([STOPS.sandton.ll, STOPS.monte.ll], { padding: [40, 40] });
+L.control.zoom({ position: "topright" }).addTo(map);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19, subdomains: "abc", attribution: "© OpenStreetMap contributors",
+}).addTo(map);
+for (const s of Object.values(STOPS)) {
+  L.circleMarker(s.ll, { radius: 6, color: "#b8860b", weight: 3, fillColor: "#fff", fillOpacity: 1 })
+    .bindTooltip(s.name, { permanent: true, direction: "right", offset: [8, 0] }).addTo(map);
+}
+
+const meMarker = L.marker([0, 0], {
+  draggable: true, zIndexOffset: 1000,
+  icon: L.divIcon({ className: "", html: '<div class="meicon"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }),
+}).bindTooltip("My stop", { direction: "top", offset: [0, -12] }).addTo(map);
+const leadCircle = L.circle([0, 0], { radius: 1, color: "#1d4ed8", weight: 1, dashArray: "4 6", fill: false, interactive: false }).addTo(map);
+
+function myStop() {
+  if (cfg.stop === "custom" && cfg.custom) return cfg.custom;
+  return (STOPS[cfg.stop] || STOPS.sandton).ll;
+}
+function placeMe() {
+  const ll = myStop();
+  meMarker.setLatLng(ll);
+  // Rough reach of a bus in the alert window, for orientation only.
+  leadCircle.setLatLng(ll).setRadius(Math.min(15000, (cfg.lead / 60) * DEFAULT_KMH / ROAD_FACTOR * 1000));
+}
+function setCustom(ll) {
+  cfg.custom = [+ll[0].toFixed(6), +ll[1].toFixed(6)];
+  cfg.stop = "custom";
+  store.set("custom", cfg.custom); store.set("stop", "custom");
+  $("stop").value = "custom";
+  placeMe(); render();
+}
+meMarker.on("dragend", e => { const p = e.target.getLatLng(); setCustom([p.lat, p.lng]); });
+map.on("click", e => { if (cfg.stop === "custom") setCustom([e.latlng.lat, e.latlng.lng]); });
+
+// ---------- live state ----------
+const buses = new Map();      // key → bus state
+let lastOk = 0, lastErr = null, routeInfoSeen = false, fetching = false, pollTimer = null;
+let watchKey = store.get("watch", null);
+
+function busIcon(b) {
+  const cls = ["busicon", b.match ? "" : "other", b.stale ? "stale" : "", b.key === watchKey ? "watch" : ""].join(" ");
+  const label = b.match ? "S5" : (b.route || "bus").slice(0, 4);
+  const arrow = b.heading == null ? "" : `<div class="arrow" style="transform:rotate(${b.heading}deg)"></div>`;
+  return L.divIcon({ className: "", html: `<div class="${cls}">${arrow}<div class="dot">${esc(label)}</div></div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function animate(b, to, ms) {
+  const from = b.marker.getLatLng();
+  const start = performance.now();
+  cancelAnimationFrame(b.anim);
+  const step = t => {
+    const k = Math.min(1, (t - start) / ms);
+    const e = k < .5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+    b.marker.setLatLng([from.lat + (to[0] - from.lat) * e, from.lng + (to[1] - from.lng) * e]);
+    if (k < 1) b.anim = requestAnimationFrame(step);
+  };
+  b.anim = requestAnimationFrame(step);
+}
+
+function ingest(vehicles) {
+  const now = Date.now();
+  routeInfoSeen = vehicles.some(v => v.route);
+  const seen = new Set();
+  const unkeyed = [];
+  for (const v of vehicles) {
+    if (v.id) { upsert("id:" + v.id, v, now); seen.add("id:" + v.id); }
+    else unkeyed.push(v);
+  }
+  // No ids in the feed: follow each bus by matching it to the nearest bus from the last update.
+  const free = [...buses.values()].filter(b => b.key.startsWith("n:") && !seen.has(b.key));
+  for (const v of unkeyed) {
+    let best = null, bestD = 0.8;
+    for (const b of free) { const d = distKm(b.ll, v.ll); if (d < bestD) { best = b; bestD = d; } }
+    const key = best ? best.key : "n:" + Math.random().toString(36).slice(2, 8);
+    if (best) free.splice(free.indexOf(best), 1);
+    upsert(key, v, now); seen.add(key);
+  }
+  for (const [k, b] of buses) {
+    if (!seen.has(k)) { b.marker.remove(); b.trail.remove(); buses.delete(k); }
+  }
+}
+
+function upsert(key, v, now) {
+  let b = buses.get(key);
+  const match = ROUTE_MATCH.test(v.route) || ROUTE_MATCH.test(v.text);
+  if (!b) {
+    b = { key, hist: [], alerted: 0 };
+    b.marker = L.marker(v.ll, { zIndexOffset: 500 }).on("click", () => toggleWatch(key));
+    b.trail = L.polyline([], { color: "#c8102e", weight: 3, opacity: .45, interactive: false });
+    buses.set(key, b);
+  }
+  const moved = !b.ll || distKm(b.ll, v.ll) > 0.005;
+  Object.assign(b, { id: v.id, route: v.route, match, fix: v.time || now });
+  b.stale = now - b.fix > STALE_MS;
+  if (moved || !b.hist.length) { b.hist.push({ ll: v.ll, t: v.time || now }); b.movedAt = now; }
+  if (b.hist.length > 12) b.hist.shift();
+  const prev = b.hist.length > 1 ? b.hist[b.hist.length - 2] : null;
+  b.heading = v.heading != null ? v.heading : prev && moved ? bearing(prev.ll, v.ll) : b.heading ?? null;
+  // Speed: from the feed if given, otherwise measured between fixes.
+  let kmh = v.speed;
+  if (kmh == null && prev) {
+    const h = (b.hist[b.hist.length - 1].t - prev.t) / 3.6e6;
+    if (h > 0) kmh = distKm(prev.ll, v.ll) / h;
+  }
+  b.kmh = kmh;
+  if (b.ll) animate(b, v.ll, Math.min(cfg.every * 1000 * .9, 8000)); else b.marker.setLatLng(v.ll);
+  b.ll = v.ll;
+  b.trail.setLatLngs(b.hist.map(h => h.ll));
+  b.marker.setIcon(busIcon(b));
+}
+
+// Distance/ETA to my stop, and whether the bus is getting closer.
+function assess(b) {
+  const me = myStop();
+  const d = distKm(b.ll, me);
+  let trend = 0;
+  if (b.hist.length > 1) {
+    const old = b.hist[Math.max(0, b.hist.length - 4)];
+    trend = distKm(old.ll, me) - d;  // > 0 means closer than a few fixes ago
+  }
+  const kmh = b.kmh != null && b.kmh > 8 ? Math.min(b.kmh, 60) : DEFAULT_KMH;
+  const eta = (d * ROAD_FACTOR / kmh) * 60;
+  return { d, eta, approaching: trend > 0.03, leaving: trend < -0.03, here: d < 0.15 };
+}
+
+function visible(b) { return cfg.showAll || !routeInfoSeen || b.match; }
+
+// ---------- alerts ----------
+let audio = null, alertsOn = false, wakeLock = null;   // sound needs a fresh tap after each reload
+
+async function enableAlerts() {
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); await audio.resume(); } catch {}
+  if ("Notification" in window && Notification.permission === "default") {
+    try { await Notification.requestPermission(); } catch {}
+  }
+  try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch {}
+  alertsOn = true; beep(1); syncAlertBtn();
+}
+function disableAlerts() {
+  alertsOn = false;
+  try { wakeLock && wakeLock.release(); } catch {}
+  wakeLock = null; syncAlertBtn();
+}
+document.addEventListener("visibilitychange", async () => {
+  if (alertsOn && document.visibilityState === "visible" && "wakeLock" in navigator) {
+    try { wakeLock = await navigator.wakeLock.request("screen"); } catch {}
+  }
+});
+function syncAlertBtn() {
+  const btn = $("alertsBtn");
+  btn.textContent = alertsOn ? "🔔 Alerts on" : "🔔 Turn on alerts";
+  btn.classList.toggle("on", alertsOn);
+}
+function beep(times = 3) {
+  if (!audio) return;
+  const t0 = audio.currentTime;
+  for (let i = 0; i < times; i++) {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.frequency.value = i % 2 ? 660 : 880; o.type = "sine";
+    g.gain.setValueAtTime(0.0001, t0 + i * 0.35);
+    g.gain.exponentialRampToValueAtTime(0.5, t0 + i * 0.35 + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.35 + 0.28);
+    o.connect(g).connect(audio.destination); o.start(t0 + i * 0.35); o.stop(t0 + i * 0.35 + 0.3);
+  }
+}
+function fire(b, a) {
+  const what = b.match ? "S5 bus" : "Bus" + (b.route ? " " + b.route : "");
+  const msg = a.here ? `${what} is at your stop now` : `${what} about ${Math.max(1, Math.round(a.eta))} min from your stop (${a.d.toFixed(1)} km)`;
+  const el = $("alarm");
+  el.textContent = "🚌 " + msg; el.hidden = false;
+  clearTimeout(fire.t); fire.t = setTimeout(() => (el.hidden = true), 60000);
+  beep(4);
+  try { navigator.vibrate && navigator.vibrate([400, 150, 400, 150, 400]); } catch {}
+  try {
+    if ("Notification" in window && Notification.permission === "granted")
+      new Notification("S5 Live", { body: msg, tag: "s5-" + b.key, renotify: true });
+  } catch {}
+}
+function checkAlerts(list) {
+  if (!alertsOn) return;
+  const now = Date.now();
+  for (const { b, a } of list) {
+    if (b.stale || a.leaving) continue;
+    const watched = b.key === watchKey;
+    if (!watched && (watchKey && buses.has(watchKey))) continue;   // only the watched bus while one is chosen
+    const due = (a.approaching || a.here) && (a.eta <= cfg.lead || a.here);
+    if (due && now - b.alerted > REALERT_MS) { b.alerted = now; fire(b, a); }
+  }
+}
+function toggleWatch(key) {
+  watchKey = watchKey === key ? null : key;
+  store.set("watch", watchKey);
+  for (const b of buses.values()) b.marker.setIcon(busIcon(b));
+  if (watchKey && !alertsOn) enableAlerts();
+  render();
+}
+
+// ---------- list + status ----------
+function render() {
+  const rows = [...buses.values()].filter(visible).map(b => ({ b, a: assess(b) }));
+  rows.sort((x, y) => (y.a.approaching - x.a.approaching) || (x.a.eta - y.a.eta));
+  for (const b of buses.values()) {
+    const show = visible(b);
+    if (show && !map.hasLayer(b.marker)) { b.marker.addTo(map); b.trail.addTo(map); }
+    if (!show && map.hasLayer(b.marker)) { b.marker.remove(); b.trail.remove(); }
+  }
+  const list = $("list");
+  if (!rows.length) {
+    list.innerHTML = lastOk
+      ? `<p class="muted" style="margin:0">No ${cfg.showAll || !routeInfoSeen ? "" : "S5 "}buses on the road in this area right now.</p>`
+      : "";
+  } else {
+    list.innerHTML = rows.slice(0, 8).map(({ b, a }) => {
+      const cls = a.here ? "now" : a.leaving ? "away" : a.approaching && a.eta <= cfg.lead ? "near" : "";
+      const stopped = Date.now() - b.movedAt > 2 * 60 * 1000;
+      const trend = a.here ? "at your stop" : a.approaching ? "coming towards you" : a.leaving ? "moving away" : stopped ? "stopped" : "not moving closer yet";
+      const age = Math.round((Date.now() - b.fix) / 1000);
+      const ageTxt = age < 90 ? `${age}s ago` : `${Math.round(age / 60)} min ago`;
+      const name = b.id ? `Bus ${esc(b.id)}` : "Bus";
+      return `<div class="bus ${b.key === watchKey ? "watch" : ""}" data-key="${esc(b.key)}">
+        <span class="tag ${b.match ? "" : "other"}">${b.match ? "S5" : esc((b.route || "Bus").slice(0, 5))}</span>
+        <div><div><b>${name}</b> · <span class="${cls}">${trend}</span></div>
+          <div class="meta">${a.d.toFixed(1)} km away${b.kmh != null && b.kmh < 120 ? ` · ${Math.round(b.kmh)} km/h` : ""} · GPS ${ageTxt}${b.stale ? " (old)" : ""}
+          ${b.key === watchKey ? " · <b>alerting for this bus</b>" : " · tap to alert for this bus"}</div></div>
+        <div class="eta ${cls}">${a.here ? "Here" : a.leaving ? "—" : "~" + Math.max(1, Math.round(a.eta)) + "'"}<small>${a.leaving ? "" : "est. min"}</small></div>
+      </div>`;
+    }).join("");
+  }
+  const stopName = cfg.stop === "custom" ? "your pin" : STOPS[cfg.stop].name;
+  $("foot").textContent = lastOk
+    ? `${rows.length} bus${rows.length === 1 ? "" : "es"} shown · ETAs are estimates from live GPS and straight-line distance to ${stopName}.` +
+      (routeInfoSeen ? "" : " Gautrain's feed doesn't say which route a bus is on, so every Gautrain bus between Montecasino and Sandton is shown.")
+    : "";
+  checkAlerts(rows);
+  setStatus();
+}
+document.getElementById("list").addEventListener("click", e => {
+  const el = e.target.closest(".bus"); if (!el) return;
+  const b = buses.get(el.dataset.key);
+  toggleWatch(el.dataset.key);
+  if (b) map.panTo(b.marker.getLatLng());
+});
+
+function setStatus() {
+  const pill = $("status"), txt = pill.querySelector("span");
+  const age = lastOk ? Math.round((Date.now() - lastOk) / 1000) : null;
+  pill.className = "pill";
+  if (lastErr && (!lastOk || age > cfg.every * 3)) { pill.classList.add("err"); txt.textContent = "Feed offline"; }
+  else if (lastOk) { pill.classList.add("live"); txt.textContent = age < 5 ? "Live" : `Live · ${age}s`; }
+  else txt.textContent = "Connecting…";
+  const m = $("feedMsg");
+  if (lastErr && (!lastOk || age > cfg.every * 3)) {
+    m.hidden = false;
+    m.innerHTML = `<b>Can't get live bus positions.</b> ${esc(lastErr)}<br>` +
+      `<span class="muted">Check your internet connection. If it keeps happening, the relay or Gautrain's feed may be down (⚙ settings shows the last answer). You can also check the <a href="https://www.gautrain.co.za/" target="_blank" rel="noopener">Gautrain website</a>. Bus info: <a href="tel:0102231098">010 223 1098</a>.</span>`;
+  } else m.hidden = true;
+}
+
+// ---------- polling ----------
+async function poll() {
+  if (fetching) return;
+  fetching = true;
+  const ctl = new AbortController();
+  const to = setTimeout(() => ctl.abort(), 12000);
+  try {
+    const headers = { "Content-Type": "application/json" };
+    if (cfg.feedKey) { headers.Authorization = "Bearer " + cfg.feedKey; headers.apikey = cfg.feedKey; }
+    const body = JSON.stringify({ east: String(BOX.east), south: String(BOX.south), north: String(BOX.north), west: String(BOX.west) });
+    const res = await fetch(cfg.feedUrl, { method: "POST", headers, body, signal: ctl.signal, cache: "no-store" });
+    const text = await res.text();
+    $("raw").textContent = `HTTP ${res.status} · ${new Date().toLocaleTimeString()}\n` + text.slice(0, 4000);
+    if (!res.ok) throw new Error(`The feed answered with an error (HTTP ${res.status}).`);
+    let data;
+    try { data = JSON.parse(text); } catch { throw new Error("The feed sent something that isn't bus data."); }
+    const vehicles = extractVehicles(data);
+    if (!vehicles.length) console.warn("Feed response had no recognisable bus positions", text.slice(0, 500));
+    ingest(vehicles);
+    lastOk = Date.now(); lastErr = null;
+  } catch (e) {
+    lastErr = e.name === "AbortError" ? "The feed took too long to answer."
+      : e instanceof TypeError ? "The feed couldn't be reached from this browser."
+      : e.message;
+  } finally {
+    clearTimeout(to); fetching = false; render();
+  }
+}
+function startPolling() {
+  clearInterval(pollTimer);
+  poll();
+  pollTimer = setInterval(poll, Math.max(5, cfg.every) * 1000);
+}
+setInterval(setStatus, 1000);
+
+// ---------- controls ----------
+function $(id) { return document.getElementById(id); }
+$("stop").value = cfg.stop;
+$("lead").value = cfg.lead;
+$("stop").addEventListener("change", e => {
+  cfg.stop = e.target.value; store.set("stop", cfg.stop);
+  if (cfg.stop === "custom" && !cfg.custom) { const c = map.getCenter(); setCustom([c.lat, c.lng]); }
+  placeMe(); render();
+});
+$("lead").addEventListener("change", e => {
+  cfg.lead = Math.min(60, Math.max(1, +e.target.value || 10)); e.target.value = cfg.lead;
+  store.set("lead", cfg.lead); placeMe(); render();
+});
+$("alertsBtn").addEventListener("click", () => (alertsOn ? disableAlerts() : enableAlerts()));
+$("locate").addEventListener("click", () => {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(
+    p => { setCustom([p.coords.latitude, p.coords.longitude]); map.setView(cfg.custom, 15); },
+    () => alert("Couldn't get your location. Choose \"Pin on map\" and tap your stop instead."),
+    { enableHighAccuracy: true, timeout: 10000 });
+});
+$("openSettings").addEventListener("click", () => {
+  $("feedUrl").value = cfg.feedUrl; $("feedKey").value = cfg.feedKey;
+  $("every").value = cfg.every; $("showAll").checked = cfg.showAll;
+  $("settings").showModal();
+});
+$("resetFeed").addEventListener("click", () => { $("feedUrl").value = DEFAULT_FEED; $("feedKey").value = DEFAULT_KEY; });
+$("copyRaw").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("raw").textContent); $("copyRaw").textContent = "Copied"; } catch {}
+});
+$("settings").addEventListener("close", () => {
+  if ($("settings").returnValue !== "save") return;
+  cfg.feedUrl = $("feedUrl").value.trim() || DEFAULT_FEED;
+  cfg.feedKey = $("feedKey").value.trim();
+  cfg.every = Math.min(120, Math.max(5, +$("every").value || 10));
+  cfg.showAll = $("showAll").checked;
+  for (const k of ["feedUrl", "feedKey", "every", "showAll"]) store.set(k, cfg[k]);
+  lastOk = 0; lastErr = null;
+  for (const b of buses.values()) { b.marker.remove(); b.trail.remove(); }
+  buses.clear();
+  startPolling();
+});
+
+// Relay address can also come from the link, e.g. s5-live-map.html#feed=https://…
+(function fromHash() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  if (p.get("feed")) { cfg.feedUrl = p.get("feed"); store.set("feedUrl", cfg.feedUrl); }
+  if (p.get("key")) { cfg.feedKey = p.get("key"); store.set("feedKey", cfg.feedKey); }
+})();
+
+syncAlertBtn();
+placeMe();
+requestAnimationFrame(() => { map.invalidateSize(); map.fitBounds([STOPS.sandton.ll, STOPS.monte.ll], { padding: [40, 40] }); });
+startPolling();
+</script>
+</body>
+</html>
