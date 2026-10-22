@@ -559,7 +559,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     vibrate: saved.vibrate !== false,
     smartDir: saved.smartDir !== false,
     live: saved.live !== false,
-    commute: saved.commute === true,
+    commute: saved.commute !== false,
     commuteUsual: typeof saved.commuteUsual === 'string' && /^\d\d:\d\d$/.test(saved.commuteUsual) ? saved.commuteUsual : '06:35',
     home: store.get('s5.home', null),
     remind: null,
@@ -1292,7 +1292,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     const now = m.now, today = m.today, t = (now - m.todayStart) / MIN;
     let ds = m.todayStart, when = '', mode = '', plans = [];
     if (today.service) {
-      if (t < 11 * 60) { mode = 'am'; plans = morningPlans(ds, now); }
+      // In the small hours, plan from your usual time rather than the first bus of the day.
+      if (t < 11 * 60) { mode = 'am'; plans = morningPlans(ds, t < 4 * 60 ? ds + (parseHHMM(state.commuteUsual) - 15) * MIN : now); }
       if (!plans.length) { mode = 'pm'; plans = eveningPlans(ds, now); }
     }
     if (!plans.length) {
@@ -1328,7 +1329,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       ];
       const homeTo = state.home ? uberLink(state.home, 'Home') : null;
       actions = '<button class="btn ' + (remindOn(p.bookBy) ? 'armed' : 'primary') + '" data-action="remind" data-at="' + p.bookBy + '" data-what="pm">' + ICON.bell + '<span>' + (remindOn(p.bookBy) ? 'Reminder set' : 'Remind me to book') + '</span></button>' +
-        (homeTo ? '<a class="btn" href="' + esc(homeTo) + '" target="_blank" rel="noopener">' + ICON.pin + '<span>Open Uber</span></a>' : '');
+        (homeTo ? '<a class="btn" href="' + esc(homeTo) + '" target="_blank" rel="noopener">' + ICON.pin + '<span>Open Uber</span></a>' : '<button class="btn" data-action="home-here">' + ICON.pin + '<span>Set home to here</span></button>');
       if (p.mon.ms > sunset) notes.push('It\'ll be dark when you reach Montecasino: book before you get off, and wait in a well-lit spot by the bus stop until your driver arrives.');
       const lc = lastConnection(m.todayStart);
       if (lc) notes.push('Last connection home: the <b>' + trainHhmm(lc.train) + '</b> train from Midrand makes the last S5 (' + hhmmMs(lc.bus) + ').');
