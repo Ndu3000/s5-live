@@ -121,6 +121,14 @@ select option{background:#121a24;color:#eef2f7}
 .livebox.quiet svg{color:var(--faint)}
 .gps{font-style:normal;font-size:10px;font-weight:850;letter-spacing:.06em;color:#00152b;background:var(--blue);border-radius:5px;padding:1px 5px;margin-inline-start:4px;vertical-align:1px;white-space:nowrap}
 .hero-cd .val.livev{color:var(--blue)}
+.commute .cm-next{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;margin-top:8px}
+.commute .cm-next .big{font-size:21px;font-weight:850;line-height:1.15}
+.commute .cm-next .cd{font-size:20px;font-weight:850;color:var(--gold);font-variant-numeric:tabular-nums;white-space:nowrap}
+.commute .cm-next.go .big,.commute .cm-next.go .cd{color:var(--red)}
+.commute .journey{margin-top:12px}
+.commute .journey li.train-step .jd{background:#b12f23;border-color:#b12f23}
+.commute .actions{flex-wrap:wrap}
+.commute .actions a.btn{text-decoration:none;color:var(--text)}
 .missed{display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-size:12.5px;color:var(--muted);padding:9px 12px;border-radius:12px;border:1px dashed var(--line)}
 .missed svg{width:16px;height:16px;flex:none;margin-top:1px}
 .missed b{color:var(--text)}
@@ -339,6 +347,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
 
   <main>
     <section class="tab" id="tab-live" role="tabpanel" aria-labelledby="nav-live">
+      <div id="commute"></div>
       <div id="live"></div>
       <div id="helpCard"></div>
     </section>
@@ -387,6 +396,10 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     <div class="set-row"><label class="lbl" for="lead">Ring the alert</label><select id="lead"><option value="0">When it's time to leave</option><option value="2">2 min before I need to leave</option><option value="5">5 min before I need to leave</option><option value="10">10 min before I need to leave</option></select></div>
     <div class="set-row switch"><label for="sound">Alarm sound</label><input type="checkbox" id="sound" checked></div>
     <div class="set-row switch"><label for="vibrate">Vibrate (on supported phones)</label><input type="checkbox" id="vibrate" checked></div>
+    <div class="set-row"><div class="switch"><div><label for="commuteOn">My commute</label><div class="hint">Door to door: ride to Montecasino, S5 to Sandton, Gautrain to Midrand — and back.</div></div><input type="checkbox" id="commuteOn"></div>
+      <div class="lbl" style="margin-top:10px"><label for="commuteUsual">I usually leave home around</label></div><input type="time" id="commuteUsual" value="06:35" step="60" style="margin-top:6px">
+      <div class="hint" id="homeNote" style="margin-top:8px"></div>
+      <div class="chips"><button class="chip" data-action="home-here">Set home to where I am now</button><button class="chip" data-action="home-forget">Forget home</button></div></div>
     <div class="set-row switch"><div><label for="liveOn">Live bus GPS</label><div class="hint" id="liveNote">Shows real bus positions and warns you if your bus is early or late.</div></div><input type="checkbox" id="liveOn" checked></div>
     <div class="set-row switch"><div><label for="smartDir">Smart direction</label><div class="hint">Opens on “To Sandton” before noon and “To Montecasino” after noon.</div></div><input type="checkbox" id="smartDir" checked></div>
     <button class="btn" data-action="test-alarm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span>Test the alert</span></button>
@@ -470,6 +483,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   function dayStartMs(ms) { const d = new Date(ms + SAST); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - SAST; }
   function hhmm(min) { const m = ((Math.round(min) % 1440) + 1440) % 1440; return pad(Math.floor(m / 60)) + ':' + pad(m % 60); }
   const hhmmMs = ms => hhmm((ms - dayStartMs(ms)) / MIN);
+  // Train departures round down, so the time shown is never later than the train leaves.
+  const trainHhmm = ms => hhmm(Math.floor((ms - dayStartMs(ms)) / MIN));
   function fmtDur(ms) {
     if (ms <= 0) return 'now';
     const s = Math.ceil(ms / 1000), m = Math.floor(s / 60), sec = s % 60;
@@ -544,6 +559,10 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     vibrate: saved.vibrate !== false,
     smartDir: saved.smartDir !== false,
     live: saved.live !== false,
+    commute: saved.commute === true,
+    commuteUsual: typeof saved.commuteUsual === 'string' && /^\d\d:\d\d$/.test(saved.commuteUsual) ? saved.commuteUsual : '06:35',
+    home: store.get('s5.home', null),
+    remind: null,
     delay: 0,
     tab: 'live',
     planMode: 'arrive',
@@ -562,7 +581,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     if (state.dirId === 'toMontecasino') { state.planMode = 'depart'; state.planTime = '17:00'; }
   })();
   function persist() {
-    store.set('s5.settings', { dirId: state.dirId, board: state.board, alight: state.alight, walk: state.walk, buffer: state.buffer, lead: state.lead, sound: state.sound, vibrate: state.vibrate, smartDir: state.smartDir, live: state.live });
+    store.set('s5.settings', { dirId: state.dirId, board: state.board, alight: state.alight, walk: state.walk, buffer: state.buffer, lead: state.lead, sound: state.sound, vibrate: state.vibrate, smartDir: state.smartDir, live: state.live, commute: state.commute, commuteUsual: state.commuteUsual });
   }
 
   /* ---------- Route geometry ----------
@@ -1016,7 +1035,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   }
   let wakeLock = null, wakeBusy = false;
   function keepAwake() { // keep the screen on while an alert is waiting, where the browser allows it
-    const want = state.alerts.some(al => !al.fired);
+    const want = state.alerts.some(al => !al.fired) || !!state.remind;
     try {
       if (want && !wakeLock && !wakeBusy && navigator.wakeLock && document.visibilityState === 'visible') {
         wakeBusy = true;
@@ -1062,6 +1081,90 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     alarmLoop = setInterval(() => { n += 1; if (n >= 20) { stopAlarmSound(); return; } chime(); }, 1500);
   }
   function stopAlarmSound() { if (alarmLoop) { clearInterval(alarmLoop); alarmLoop = null; } }
+
+  /* ---------- My commute: home ⇄ Montecasino (ride) ⇄ Sandton (S5) ⇄ Midrand (Gautrain train) ----------
+     Shown only when turned on in Settings (or by a personal setup link). Home is kept on this device only. */
+  const hm = (h, m, sec = 0) => h * 60 + m + sec / 60;
+  // Gautrain North–South line on weekdays, from Gautrain's journey planner (sampled for 23 Oct 2026).
+  const TRAINS = {
+    north: { from: 'Sandton', to: 'Midrand', ride: 9.72, deps: Array.from({ length: 19 }, (_, k) => hm(5, 37, 48) + 10 * k).concat([hm(8, 57, 48), hm(9, 18, 48), hm(9, 38, 48), hm(9, 58, 48), hm(10, 18, 48), hm(10, 38, 48)]) },
+    south: { from: 'Midrand', to: 'Sandton', ride: 9.97, deps: [hm(14, 7, 50), hm(14, 27, 50)].concat(Array.from({ length: 23 }, (_, k) => hm(14, 48, 30) + 10 * k), [hm(18, 39, 30), hm(18, 59, 30), hm(19, 19, 30), hm(19, 39, 30), hm(19, 59, 30), hm(20, 19, 30), hm(20, 39, 30), hm(20, 59, 30)]) }
+  };
+  // Driving minutes between home and the S5 stop at Montecasino (TomTom, typical weekday traffic), by time of day.
+  const RIDE_TO_MONTE = [[360, 10.2], [390, 10.6], [420, 11.1], [450, 11.6], [480, 11.7]];
+  const RIDE_HOME = [[990, 14.7], [1020, 14.8], [1050, 14.5], [1080, 13.8], [1140, 11.8]];
+  const RIDE_EXTRA = 2, DRIVER_ETA = 6, SANDTON_TRANSFER = 6, PLATFORM_WALK = 2;
+  const inSA = (lat, lon) => lat < -21 && lat > -35.5 && lon > 15 && lon < 33.5;
+  const MONTE_STOP = { lat: -26.02466, lon: 28.0114, name: 'Montecasino (Gautrain bus stop, Palazzo Circle)' };
+  // Rough Johannesburg sunset by month, for after-dark advice.
+  const SUNSET = [hm(19, 5), hm(18, 55), hm(18, 25), hm(17, 50), hm(17, 28), hm(17, 25), hm(17, 35), hm(17, 50), hm(18, 3), hm(18, 15), hm(18, 35), hm(18, 55)];
+  const interp = (tbl, t) => {
+    if (t <= tbl[0][0]) return tbl[0][1];
+    for (let i = 0; i < tbl.length - 1; i++) if (t < tbl[i + 1][0]) { const f = (t - tbl[i][0]) / (tbl[i + 1][0] - tbl[i][0]); return tbl[i][1] + f * (tbl[i + 1][1] - tbl[i][1]); }
+    return tbl[tbl.length - 1][1];
+  };
+  // When S5 trip i reaches stop k: live GPS if it can see the bus, otherwise the traffic-adjusted timetable.
+  function s5At(dirId, i, k, ds, now) {
+    const lv = ds === dayStartMs(now) ? liveFor(dirId, i, k, now) : null;
+    if (lv && lv.etaMs) return { ms: lv.etaMs, live: true };
+    const dir = DIRS[dirId], st = dir.starts[i] + state.delay;
+    return { ms: ds + (st + runMin(dir, 0, k, st)) * MIN, live: false };
+  }
+  function trainAfter(tr, ms, ds) {
+    const t = (ms - ds) / MIN, d = tr.deps.find(x => x >= t);
+    return d == null ? null : { dep: ds + d * MIN, arr: ds + (d + tr.ride) * MIN };
+  }
+  function morningPlans(ds, from) {
+    const dir = DIRS.toSandton, last = lastIdx(dir), out = [];
+    for (let i = 0; i < dir.starts.length && out.length < 2; i++) {
+      const busDep = ds + (dir.starts[i] + state.delay) * MIN, atStop = busDep - state.buffer * MIN;
+      const ride = interp(RIDE_TO_MONTE, (atStop - ds) / MIN - 12) + RIDE_EXTRA;
+      const pickup = atStop - ride * MIN, bookBy = pickup - DRIVER_ETA * MIN;
+      if (bookBy < from - 30000) continue;
+      const sand = s5At('toSandton', i, last, ds, from);
+      const train = trainAfter(TRAINS.north, sand.ms + SANDTON_TRANSFER * MIN, ds);
+      if (train) out.push({ i, busDep, atStop, pickup, bookBy, ride, sand, train });
+    }
+    return out;
+  }
+  function eveningPlans(ds, from) {
+    const dir = DIRS.toMontecasino, last = lastIdx(dir), out = [], t = (from - ds) / MIN + PLATFORM_WALK;
+    for (const d of TRAINS.south.deps) {
+      if (out.length >= 2) break;
+      if (d < t) continue;
+      const sandArr = ds + (d + TRAINS.south.ride) * MIN;
+      const i = dir.starts.findIndex(st => ds + (st + state.delay) * MIN >= sandArr + SANDTON_TRANSFER * MIN);
+      if (i < 0) break;
+      const mon = s5At('toMontecasino', i, last, ds, from), ride = interp(RIDE_HOME, (mon.ms - ds) / MIN) + RIDE_EXTRA;
+      out.push({ trainDep: ds + d * MIN, sandArr, i, busDep: ds + (dir.starts[i] + state.delay) * MIN, mon, bookBy: mon.ms - DRIVER_ETA * MIN, home: mon.ms + ride * MIN, ride });
+    }
+    return out;
+  }
+  function lastConnection(ds) { // the latest train from Midrand that still makes the last S5 home
+    const dir = DIRS.toMontecasino, lastBus = ds + (dir.starts[dir.starts.length - 1] + state.delay) * MIN;
+    const ok = TRAINS.south.deps.filter(d => ds + (d + TRAINS.south.ride + SANDTON_TRANSFER) * MIN <= lastBus);
+    return ok.length ? { train: ds + ok[ok.length - 1] * MIN, bus: lastBus } : null;
+  }
+  // Opens Uber with the drop-off filled in; Uber shows the live price before you confirm.
+  function uberLink(to, name) {
+    return 'https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[latitude]=' + to.lat + '&dropoff[longitude]=' + to.lon + '&dropoff[nickname]=' + encodeURIComponent(name);
+  }
+  function setReminder(at, title, body) {
+    if (state.remind && Math.abs(state.remind.at - at) < 1000) { state.remind = null; toast('Reminder cancelled'); }
+    else if (at <= Date.now()) { toast('Book your ride now'); return; }
+    else { state.remind = { at, title, body }; maybeAskNotify(); toast('I\'ll remind you at ' + hhmmMs(at)); }
+    keepAwake(); tick(true);
+  }
+  function processReminder(now) {
+    const r = state.remind;
+    if (!r || now < r.at) return;
+    state.remind = null; keepAwake();
+    $('alarmTitle').textContent = r.title;
+    $('alarmBody').innerHTML = r.body;
+    openOverlay('alarm'); startAlarmSound();
+    if (state.vibrate) { try { if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 900]); } catch (e) { /* not supported */ } }
+    notify(r.title, r.body.replace(/<[^>]+>/g, ''));
+  }
 
   /* ---------- Views ---------- */
   function howText() {
@@ -1184,6 +1287,56 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     return '<div class="section-title"><span>' + (isToday ? 'Later buses' : 'Then · ' + esc(m.day.short)) + '</span><span class="aside">from ' + esc(stopTitle(m.dir.stops[m.b])) + '</span></div><div class="list">' + rows + '</div>';
   }
   function liveHtml(m) { return bannerHtml(m) + missedHtml(m) + heroHtml(m) + laterHtml(m); }
+  function commuteHtml(m) {
+    if (!state.commute) return '';
+    const now = m.now, today = m.today, t = (now - m.todayStart) / MIN;
+    let ds = m.todayStart, when = '', mode = '', plans = [];
+    if (today.service) {
+      if (t < 11 * 60) { mode = 'am'; plans = morningPlans(ds, now); }
+      if (!plans.length) { mode = 'pm'; plans = eveningPlans(ds, now); }
+    }
+    if (!plans.length) {
+      const nd = today.service && t < 4 * 60 ? today : nextServiceDay(m.todayStart);
+      ds = nd.start; when = relDay(nd, today); mode = 'am';
+      plans = morningPlans(ds, ds + (parseHHMM(state.commuteUsual) - 15) * MIN);
+    }
+    if (!plans.length) return '';
+    const p = plans[0], soon = !when, remindOn = r => state.remind && Math.abs(state.remind.at - r) < 1000;
+    const tagLive = x => (x.live ? ' <em class="gps">LIVE</em>' : '');
+    let head, steps, actions, notes = [];
+    if (mode === 'am') {
+      const cd = soon ? '<span data-to="' + p.bookBy + '"></span>' : '';
+      head = '<div class="cm-next' + (soon && p.bookBy - now < 2 * MIN ? ' go' : '') + '"><div class="big">Book your ride by ' + hhmmMs(p.bookBy) + '</div><div class="cd">' + cd + '</div></div>';
+      steps = [
+        ['', p.pickup, 'Ride from home', 'Uber/Bolt · about ' + Math.round(p.ride) + ' min · drivers are usually ~' + DRIVER_ETA + ' min away when you book'],
+        ['bus-step', p.busDep, 'S5 from Montecasino', 'be at the bus stop (Palazzo Circle) by ' + hhmmMs(p.atStop)],
+        ['', p.sand.ms, 'Sandton Station' + tagLive(p.sand), (p.sand.live ? 'live GPS' : 'in today\'s traffic') + ' · about ' + SANDTON_TRANSFER + ' min from the bus to the platform'],
+        ['train-step', p.train.dep, 'Gautrain to Midrand', 'every 10 min until 08:37, then every 20 min'],
+        ['end-step', p.train.arr, 'Midrand', 'door to door about ' + Math.round((p.train.arr - p.pickup) / MIN + DRIVER_ETA) + ' min from booking']
+      ];
+      actions = soon ? '<button class="btn ' + (remindOn(p.bookBy) ? 'armed' : 'primary') + '" data-action="remind" data-at="' + p.bookBy + '" data-what="am">' + ICON.bell + '<span>' + (remindOn(p.bookBy) ? 'Reminder set' : 'Remind me to book') + '</span></button>' +
+        '<a class="btn" href="' + esc(uberLink(MONTE_STOP, MONTE_STOP.name)) + '" target="_blank" rel="noopener">' + ICON.pin + '<span>Open Uber</span></a>' : '';
+      if (plans[1]) notes.push('Next option: book by <b>' + hhmmMs(plans[1].bookBy) + '</b> for the ' + hhmmMs(plans[1].busDep) + ' S5 → Midrand <b>' + hhmmMs(plans[1].train.arr) + '</b>.');
+    } else {
+      const sunset = m.todayStart + SUNSET[new Date(now + SAST).getUTCMonth()] * MIN;
+      head = '<div class="cm-next"><div class="big">Catch the ' + trainHhmm(p.trainDep) + ' train at Midrand</div><div class="cd"><span data-to="' + p.trainDep + '"></span></div></div>';
+      steps = [
+        ['train-step', p.trainDep, 'Gautrain to Sandton', 'from Midrand · arrives ' + hhmmMs(p.sandArr)],
+        ['bus-step', p.busDep, 'S5 from Sandton Station', 'about ' + SANDTON_TRANSFER + ' min from the platform to the bus'],
+        ['', p.mon.ms, 'Montecasino' + tagLive(p.mon), 'book your ride at ~' + hhmmMs(p.bookBy) + ', while you\'re still on the bus, so the driver is there when you get off'],
+        ['end-step', p.home, 'Home', 'ride about ' + Math.round(p.ride) + ' min']
+      ];
+      const homeTo = state.home ? uberLink(state.home, 'Home') : null;
+      actions = '<button class="btn ' + (remindOn(p.bookBy) ? 'armed' : 'primary') + '" data-action="remind" data-at="' + p.bookBy + '" data-what="pm">' + ICON.bell + '<span>' + (remindOn(p.bookBy) ? 'Reminder set' : 'Remind me to book') + '</span></button>' +
+        (homeTo ? '<a class="btn" href="' + esc(homeTo) + '" target="_blank" rel="noopener">' + ICON.pin + '<span>Open Uber</span></a>' : '');
+      if (p.mon.ms > sunset) notes.push('It\'ll be dark when you reach Montecasino: book before you get off, and wait in a well-lit spot by the bus stop until your driver arrives.');
+      const lc = lastConnection(m.todayStart);
+      if (lc) notes.push('Last connection home: the <b>' + trainHhmm(lc.train) + '</b> train from Midrand makes the last S5 (' + hhmmMs(lc.bus) + ').');
+    }
+    return '<section class="card commute" aria-label="My commute"><div class="eyebrow"><span>My commute · ' + (mode === 'am' ? 'to Midrand' : 'home') + '</span>' + (when ? '<span class="tag">' + esc(when) + '</span>' : '') + '</div>' + head +
+      '<ol class="journey">' + steps.map(st => '<li class="' + st[0] + '"><span class="jt">' + (st[0] === 'train-step' ? trainHhmm : hhmmMs)(st[1]) + '</span><span class="jd"></span><span class="jx">' + st[2] + '<small>' + st[3] + '</small></span></li>').join('') + '</ol>' +
+      (actions ? '<div class="actions">' + actions + '</div>' : '') + notes.map(n => '<p class="hint" style="margin:10px 0 0">' + n + '</p>').join('') + '</section>';
+  }
   function helpHtml(m) {
     const chips = [0, 5, 10, 15].map(v => '<button class="chip" data-action="delay" data-v="' + v + '" aria-pressed="' + (state.delay === v) + '">' + (v ? '+' + v + ' min' : 'On time') + '</button>').join('');
     const lv = m && m.mode === 'today' && m.hero.live;
@@ -1471,7 +1624,9 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     $('walk').value = String(state.walk); $('walkOut').textContent = state.walk + ' min';
     $('buffer').value = String(state.buffer); $('bufferOut').textContent = state.buffer + ' min';
     $('lead').value = String(state.lead);
-    $('sound').checked = state.sound; $('vibrate').checked = state.vibrate; $('smartDir').checked = state.smartDir; $('liveOn').checked = state.live;
+    $('sound').checked = state.sound; $('vibrate').checked = state.vibrate; $('smartDir').checked = state.smartDir; $('liveOn').checked = state.live; $('commuteOn').checked = state.commute;
+    if ($('commuteUsual').value !== state.commuteUsual) $('commuteUsual').value = state.commuteUsual;
+    $('homeNote').textContent = state.home ? 'Home is saved on this device only (used for the Uber link home).' : 'No home saved yet. It is only used for the "Open Uber" link home, and stays on this device.';
     $('plan-arrive').setAttribute('aria-pressed', String(state.planMode === 'arrive'));
     $('plan-depart').setAttribute('aria-pressed', String(state.planMode === 'depart'));
     if ($('planTime').value !== state.planTime) $('planTime').value = state.planTime;
@@ -1484,6 +1639,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     renderClock(now);
     processAlerts(now);
     const m = computeModel(now);
+    processReminder(now);
+    setHtml('commute', commuteHtml(m));
     setHtml('live', liveHtml(m));
     setHtml('helpCard', helpHtml(m));
     if (state.tab === 'route' && (force || now - lastRouteAt >= 5000)) { setHtml('routeHead', routeHeadHtml(m)); setHtml('routeView', routeHtml(m)); mapSync(m); lastRouteAt = now; }
@@ -1564,6 +1721,20 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       case 'close': { const o = el.closest('.overlay'); if (o) closeOverlay(o.id); break; }
       case 'dismiss-alarm': dismissAlarm(); break;
       case 'test-alarm': testAlarm(); break;
+      case 'remind': {
+        const at = Number(d.at), am = d.what === 'am';
+        setReminder(at, am ? 'Book your ride to Montecasino' : 'Book your ride home',
+          am ? 'Book your Uber/Bolt to <b>Montecasino</b> now to make your S5 and train to Midrand.' : 'Your S5 reaches <b>Montecasino</b> in a few minutes. Book your ride home now so it\'s waiting when you get off.');
+        break;
+      }
+      case 'home-here':
+        if (!navigator.geolocation) { toast('Location is not available here'); break; }
+        navigator.geolocation.getCurrentPosition(pos => {
+          state.home = { lat: +pos.coords.latitude.toFixed(5), lon: +pos.coords.longitude.toFixed(5) };
+          store.set('s5.home', state.home); toast('Home saved on this device'); refresh();
+        }, () => toast('Couldn\'t get your location'), { enableHighAccuracy: true, timeout: 10000 });
+        break;
+      case 'home-forget': state.home = null; store.set('s5.home', null); toast('Home forgotten'); refresh(); break;
       case 'map-fit': fitTrip(computeModel(Date.now())); break;
       case 'map-mybus': {
         const m = computeModel(Date.now()), b = m.mode === 'today' && m.hero.live ? m.hero.live.bus : null;
@@ -1591,6 +1762,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       case 'vibrate': state.vibrate = !!t.checked; persist(); break;
       case 'smartDir': state.smartDir = !!t.checked; persist(); break;
       case 'liveOn': state.live = !!t.checked; persist(); pollLive(); tick(true); break;
+      case 'commuteOn': state.commute = !!t.checked; persist(); tick(true); break;
+      case 'commuteUsual': if (/^\d\d:\d\d$/.test(t.value)) { state.commuteUsual = t.value; persist(); tick(true); } break;
       case 'planTime': state.planTime = t.value || state.planTime; tick(true); break;
       default: break;
     }
@@ -1611,7 +1784,17 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { keepAwake(); pollLive(); tick(true); } });
 
-  window.S5Tracker = { probes, liveTraffic, pollTraffic, DIRS, state, computeModel, buildTrips, busesOnRoad, dayInfo, holidays, fmtDur, hhmm, tick, live, OSM_D, LOOP_M, pollLive, runMin, planHtml };
+  window.S5Tracker = { morningPlans, eveningPlans, lastConnection, TRAINS, probes, liveTraffic, pollTraffic, DIRS, state, computeModel, buildTrips, busesOnRoad, dayInfo, holidays, fmtDur, hhmm, tick, live, OSM_D, LOOP_M, pollLive, runMin, planHtml };
+  (function setupFromLink() {
+    const q = new URLSearchParams(location.hash.slice(1));
+    if (!q.has('commute') && !q.has('home')) return;
+    if (q.get('commute') === '1') state.commute = true;
+    const h = (q.get('home') || '').split(',').map(Number);
+    if (h.length === 2 && h.every(Number.isFinite) && inSA(h[0], h[1])) { state.home = { lat: h[0], lon: h[1] }; store.set('s5.home', state.home); }
+    if (q.get('usual') && /^\d\d:\d\d$/.test(q.get('usual'))) state.commuteUsual = q.get('usual');
+    persist();
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ }
+  })();
   renderStatic();
   setTab('live');
   setInterval(tick, 1000);
