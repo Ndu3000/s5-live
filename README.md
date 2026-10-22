@@ -20,5 +20,9 @@ How live GPS works:
   of day with TomTom routing, historical traffic). Each stretch's timetable minutes are scaled by how much slower or
   faster it is than its daily average, for live arrival times and for the "expected" times when live GPS
   can't see a bus. "Arrive by" plans pick a bus that typically makes it.
+- Live traffic: `relay/s5-traffic/index.ts` (Supabase Edge Function, needs the `TOMTOM_API_KEY` secret) asks
+  TomTom for the current driving time of every stretch, cached for 2 minutes. The app trusts it for the next
+  15 minutes, blends back to typical traffic over the following 45, and names slow stretches. Without the
+  key, the app uses typical traffic.
 - The route line and stop positions come from OpenStreetMap route relation 3281475, and the map tiles are
   OpenStreetMap's (© OpenStreetMap contributors, ODbL).

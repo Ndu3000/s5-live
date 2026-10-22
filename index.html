@@ -393,7 +393,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     <div class="about">
       <p><b>About the times.</b> All times are South African time (SAST), based on the published Gautrain S5 weekday timetable (Sandton Station ⇄ Montecasino via Bryanston).</p>
       <p><b>About live GPS.</b> Bus positions come from Gautrain's bus-location feed every 10 seconds. The feed doesn't say which route a bus is on, so the app counts a bus as an S5 when it is driving along the S5 roads in the right direction, and pairs it with the timetable trip it is closest to. Arrival estimates assume the bus keeps to the timetable's pace from where it is now. If the bus is late, “leave by” still uses the scheduled time, so you never leave later than the timetable says. If it is early, “leave by” moves earlier. Route map © OpenStreetMap contributors.</p>
-      <p><b>About traffic.</b> TomTom's typical weekday traffic for each stretch of the route, at ten times of day, stretches or shrinks the timetable's minutes for that stretch. Live arrival estimates and the small expected times use it. It's typical traffic, not today's: an accident won't show until live GPS sees the bus slow down.</p>
+      <p><b>About traffic.</b> TomTom's traffic for each stretch of the route stretches or shrinks the timetable's minutes for that stretch. Live arrival estimates and the small expected times use it. When live traffic is available (TomTom, refreshed every 2 minutes), it replaces typical traffic for the next 15 minutes and blends back to typical over the following 45, and slow stretches are named.</p>
       <p>Regular Gautrain buses don't run on weekends or public holidays. Traffic can delay buses; if yours is late, call the Gautrain bus information line on 010 223 1098.</p>
       <p>Alerts ring while this app is open on your screen.</p>
       <p id="persistNote"></p>
@@ -670,12 +670,33 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       [136, 50, 35, 79, 83, 25, 74, 17, 155, 39, 126, 48, 74, 83, 42, 114, 163]
     ]
   };
-  const TRAFFIC_R = {}; // each stretch's time relative to its daily average
+  const TRAFFIC_R = {}, TRAFFIC_MEAN = {}; // each stretch's time relative to its daily average
   Object.keys(TRAFFIC_S).forEach(id => {
     const rows = TRAFFIC_S[id], mean = rows[0].map((_, leg) => rows.reduce((t, r) => t + r[leg], 0) / rows.length);
+    TRAFFIC_MEAN[id] = mean;
     TRAFFIC_R[id] = rows.map(r => r.map((sec, leg) => Math.min(2, Math.max(0.6, sec / mean[leg]))));
   });
+  /* Live traffic: TomTom's current driving time for every stretch, through the "s5-traffic" relay (cached there
+     for 2 minutes). It is trusted for the next 15 minutes and fades back to typical traffic over the following 45. */
+  const TRAFFIC_URL = 'https://gkzuuwohldqbsnzmhdmx.supabase.co/functions/v1/s5-traffic';
+  const TRAFFIC_POLL_MS = 2 * MIN, TRAFFIC_FRESH_MS = 8 * MIN;
+  const liveTraffic = { at: 0, asked: 0, R: null, sec: null, err: '' };
+  const trafficFresh = now => !!liveTraffic.R && now - liveTraffic.at < TRAFFIC_FRESH_MS;
   function trafficRatio(dirId, leg, t) {
+    const typ = typicalRatio(dirId, leg, t), now = Date.now();
+    if (!trafficFresh(now)) return typ;
+    const ahead = t - (now - dayStartMs(now)) / MIN;
+    if (ahead < -20 || ahead > 60) return typ;
+    const w = ahead <= 15 ? 1 : 1 - (ahead - 15) / 45;
+    return w * liveTraffic.R[dirId][leg] + (1 - w) * typ;
+  }
+  // Extra seconds live traffic adds to a stretch compared with typical traffic right now.
+  function liveExtraSec(dirId, leg) {
+    if (!trafficFresh(Date.now())) return 0;
+    const now = Date.now(), t = (now - dayStartMs(now)) / MIN;
+    return liveTraffic.sec[dirId][leg] - typicalRatio(dirId, leg, t) * TRAFFIC_MEAN[dirId][leg];
+  }
+  function typicalRatio(dirId, leg, t) {
     const H = TRAFFIC_AT, R = TRAFFIC_R[dirId], m = ((t % 1440) + 1440) % 1440;
     if (m <= H[0]) return R[0][leg];
     for (let s = 0; s < H.length - 1; s++) {
@@ -713,10 +734,31 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     return state.live && dayInfo(ds).service && t >= serviceSpan[0] && t <= serviceSpan[1];
   }
   const liveFresh = now => live.ok > 0 && now - live.ok < FRESH_MS;
+  async function pollTraffic(now) {
+    if (now - liveTraffic.asked < TRAFFIC_POLL_MS) return;
+    liveTraffic.asked = now;
+    try {
+      const res = await fetch(TRAFFIC_URL, { cache: 'no-store', headers: { Authorization: 'Bearer ' + FEED_KEY, apikey: FEED_KEY } });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) throw new Error(data && data.error ? data.error : 'HTTP ' + res.status);
+      const R = {}, sec = {};
+      Object.keys(DIRS).forEach(id => {
+        const legs = data[id] && data[id].live;
+        if (!Array.isArray(legs) || legs.length !== DIRS[id].stops.length - 1) throw new Error('unexpected answer');
+        sec[id] = legs.map(Number);
+        R[id] = sec[id].map((v, leg) => Math.min(3, Math.max(0.5, v / TRAFFIC_MEAN[id][leg])));
+      });
+      liveTraffic.R = R; liveTraffic.sec = sec; liveTraffic.at = Math.min(now, Number(data.at) || now); liveTraffic.err = '';
+    } catch (e) {
+      liveTraffic.err = e && e.message ? e.message : 'unavailable';
+    }
+    tick(true);
+  }
   async function pollLive() {
     const now = Date.now();
     if (!liveActive(now)) { if (live.buses.size || live.ok) { live.buses.clear(); live.ok = 0; matchTrips(now); } live.err = ''; return; }
     if (live.fetching || (document.visibilityState !== 'visible' && !state.alerts.some(al => !al.fired))) return;
+    pollTraffic(now);
     live.fetching = true;
     const ctl = typeof AbortController === 'function' ? new AbortController() : null;
     const timer = setTimeout(() => { if (ctl) ctl.abort(); }, 12000);
@@ -1024,7 +1066,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     if (lv.here) return '<b>Your bus is at your stop now</b> · ' + lateHtml(lv.late);
     const near = stopTitle(dir.stops[Math.min(lastIdx(dir), Math.floor(lv.bus.pos + 0.5))]);
     return 'Your bus is <b>' + (lv.stopsAway ? nStops(lv.stopsAway) + ' away' : 'about to reach your stop') + '</b> · near ' + esc(near) + ' · ' + lateHtml(lv.late) + at +
-      (h.expArrMs ? ' · ' + esc(stopTitle(dir.stops[m.a])) + ' ~' + hhmmMs(h.expArrMs) : '');
+      (h.expArrMs ? ' · ' + esc(stopTitle(dir.stops[m.a])) + ' ~' + hhmmMs(h.expArrMs) : '') +
+      ((s => (s ? ' · ' + s : ''))(slowSpot(dir, lv.bus.pos, m.a)));
   }
   function whereHtml(m) {
     if (m.mode !== 'today') return '';
@@ -1041,15 +1084,27 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     return '<div class="where">' + ICON.bus + '<span>Leaves ' + esc(stopTitle(dir.stops[0])) + ' at <b>' + hhmm(h.startMin) + '</b> · ' + nStops(m.b) + ' before yours' + track + '</span></div>';
   }
   const relMin = d => (d > 0 ? '+' + d + ' min' : -d + ' min early');
-  // Typical-traffic outlook for your bus when live GPS can't see it.
+  // The worst stretch of live traffic between fractional stop position p and stop k, if it costs at least 1½ min.
+  function slowSpot(dir, p, k) {
+    let worst = null;
+    for (let leg = Math.floor(p); leg < k; leg++) {
+      const x = liveExtraSec(dir.id, leg);
+      if (x >= 90 && (!worst || x > worst.x)) worst = { leg, x };
+    }
+    return worst ? 'slow traffic near ' + esc(stopTitle(dir.stops[worst.leg + 1])) + ' right now (+' + Math.round(worst.x / 60) + ' min)' : '';
+  }
+  // Traffic outlook for your bus when live GPS can't see it: live traffic if it's soon, otherwise typical traffic.
   function trafficHtml(m) {
     if (m.mode !== 'today' || m.hero.live) return '';
     const h = m.hero, dir = m.dir, dDep = Math.round((h.predDepMs - h.depMs) / MIN), dArr = Math.round((h.predArrMs - h.arrMs) / MIN), parts = [];
     if (m.b > 0 && Math.abs(dDep) >= 2) parts.push('at your stop ~<b>' + hhmmMs(h.predDepMs) + '</b> (' + relMin(dDep) + ')');
     if (Math.abs(dArr) >= 2) parts.push(esc(stopTitle(dir.stops[m.a])) + ' ~<b>' + hhmmMs(h.predArrMs) + '</b> (' + relMin(dArr) + ')');
-    if (!parts.length) return '';
-    return '<div class="livebox quiet">' + ICON.traffic + '<span>In typical traffic for ' + hhmm(h.startMin) + ': ' + parts.join(' · ') + '.' +
-      (dDep <= -1 ? ' Leave-by allows for the bus coming early.' : '') + ' <em class="est">TomTom</em></span></div>';
+    const liveT = trafficFresh(m.now) && h.startMs - m.now < 45 * MIN, slow = liveT ? slowSpot(dir, 0, m.a) : '';
+    if (!parts.length && !slow) return '';
+    const lead = liveT ? 'In live traffic now' : 'In typical traffic for ' + hhmm(h.startMin);
+    return '<div class="livebox' + (liveT ? '' : ' quiet') + '">' + ICON.traffic + '<span>' + (parts.length ? lead + ': ' + parts.join(' · ') + '.' : '') +
+      (slow ? ' ' + cap(slow) + '.' : '') + (dDep <= -1 ? ' Leave-by allows for the bus coming early.' : '') +
+      ' <em class="' + (liveT ? 'gps">TRAFFIC' : 'est">TomTom') + '</em></span></div>';
   }
   function heroHtml(m) {
     const h = m.hero, dir = m.dir, isToday = m.mode === 'today', lastI = dir.starts.length - 1;
@@ -1126,7 +1181,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     let bar;
     if (!state.live) bar = '<div class="livebar"><span class="d"></span><span>Live GPS is off · <button class="linklike" data-action="settings">turn it on in Settings</button></span></div>';
     else if (!liveActive(m.now)) bar = '<div class="livebar"><span class="d"></span><span>Live GPS starts with the first weekday bus. Until then, times come from the timetable.</span></div>';
-    else if (m.liveOn) bar = '<div class="livebar on"><span class="d"></span><span><b>Live GPS</b> · updated <span data-from="' + live.ok + '"></span> · buses on the S5 roads are shown as S5</span></div>';
+    else if (m.liveOn) bar = '<div class="livebar on"><span class="d"></span><span><b>Live GPS</b> · updated <span data-from="' + live.ok + '"></span> · ' +
+      (trafficFresh(m.now) ? '<b>live traffic</b> <span data-from="' + liveTraffic.at + '"></span>' : 'typical traffic') + ' · buses on the S5 roads are shown as S5</span></div>';
     else if (live.err) bar = '<div class="livebar err"><span class="d"></span><span><b>Live GPS unavailable</b> — ' + esc(live.err) + '. Showing timetable estimates.</span></div>';
     else bar = '<div class="livebar"><span class="d"></span><span>Connecting to live GPS…</span></div>';
     return '<div class="route-head"><h2>' + title + '</h2><p>' + sub + '</p>' +
@@ -1167,7 +1223,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     const done = mine ? '<div class="rail-done" style="top:' + y(0) + 'px;height:' + Math.max(0, y(mine.pos) - y(0)) + 'px"></div>' : '';
     return '<div class="track-cap"><span>Stop</span><span>' + (isToday ? 'Your ' + hhmm(h.depMin) + ' bus' : 'First bus') + '</span></div>' +
       '<div class="track" style="height:' + (n * ROW) + 'px"><div class="rail" style="top:' + y(0) + 'px;height:' + (last * ROW) + 'px"></div>' + done + rows + markers + '</div>' +
-      '<p class="foot">' + (m.liveOn ? 'Buses with a green dot are live GPS positions. Dashed ones are estimated from the timetable, because live GPS can\'t see them.' : 'Positions are estimated from the timetable' + (state.delay ? ' (shifted +' + state.delay + ' min)' : '') + '.') + ' Stop times are for your bus as scheduled; the small time under one is when it should really get there' + (lvBus ? ' (live GPS)' : ' in typical traffic (TomTom)') + '. Where\'s my bus? Call ' + INFO_LINE + '.</p>';
+      '<p class="foot">' + (m.liveOn ? 'Buses with a green dot are live GPS positions. Dashed ones are estimated from the timetable, because live GPS can\'t see them.' : 'Positions are estimated from the timetable' + (state.delay ? ' (shifted +' + state.delay + ' min)' : '') + '.') + ' Stop times are for your bus as scheduled; the small time under one is when it should really get there' + (lvBus ? ' (live GPS' + (trafficFresh(m.now) ? ' and live traffic)' : ')') : trafficFresh(m.now) ? ' in live traffic (TomTom)' : ' in typical traffic (TomTom)') + '. Where\'s my bus? Call ' + INFO_LINE + '.</p>';
   }
 
   /* ---------- Live map ---------- */
@@ -1343,7 +1399,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     const now = Date.now(), dot = $('liveDot'), cls = 'ldot' + (liveFresh(now) ? ' on' : liveActive(now) && live.err ? ' err' : '');
     if (dot.className !== cls) dot.className = cls;
     $('liveNote').textContent = !state.live ? 'Off: buses are placed using the timetable only.'
-      : liveFresh(now) ? 'Working · updated every 10 seconds.'
+      : liveFresh(now) ? 'Working · updated every 10 seconds · ' + (trafficFresh(now) ? 'live traffic from TomTom.' : 'typical traffic' + (liveTraffic.err ? ' (live traffic: ' + liveTraffic.err + ')' : '') + '.')
       : liveActive(now) ? (live.err ? 'Not working right now: ' + live.err + '.' : 'Connecting…')
       : 'Starts with the first weekday bus.';
   }
@@ -1507,7 +1563,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { keepAwake(); pollLive(); tick(true); } });
 
-  window.S5Tracker = { DIRS, state, computeModel, buildTrips, busesOnRoad, dayInfo, holidays, fmtDur, hhmm, tick, live, OSM_D, LOOP_M, pollLive, runMin, planHtml };
+  window.S5Tracker = { liveTraffic, pollTraffic, DIRS, state, computeModel, buildTrips, busesOnRoad, dayInfo, holidays, fmtDur, hhmm, tick, live, OSM_D, LOOP_M, pollLive, runMin, planHtml };
   renderStatic();
   setTab('live');
   setInterval(tick, 1000);
