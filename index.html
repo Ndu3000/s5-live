@@ -559,7 +559,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     vibrate: saved.vibrate !== false,
     smartDir: saved.smartDir !== false,
     live: saved.live !== false,
-    commute: saved.commute !== false,
+    commute: saved.commute === true,
     commuteUsual: typeof saved.commuteUsual === 'string' && /^\d\d:\d\d$/.test(saved.commuteUsual) ? saved.commuteUsual : '06:35',
     home: store.get('s5.home', null),
     remind: null,
