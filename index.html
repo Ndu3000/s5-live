@@ -179,6 +179,9 @@ select option{background:#121a24;color:#eef2f7}
 .stop .ar{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stop .tm{font-variant-numeric:tabular-nums;font-weight:750;font-size:13.5px;padding-inline-start:8px}
 .stop.passed .nm,.stop.passed .tm{color:var(--faint)}
+.stop .tm small.exp{display:block;font-size:11px;font-weight:700;color:var(--muted);text-align:end}
+.stop .tm small.exp.lv{color:var(--blue)}
+.expv{color:var(--blue)}
 .flag{display:inline-block;font-size:9.5px;font-weight:850;padding:2px 5px;border-radius:5px;margin-inline-start:6px;letter-spacing:.05em;vertical-align:1px}
 .flag.board{background:var(--gold);color:var(--gold-ink)}
 .flag.alight{background:var(--blue);color:#00152b}
@@ -205,6 +208,7 @@ select option{background:#121a24;color:#eef2f7}
 .mapcard .mapbtns svg{width:18px;height:18px}
 .mapcard .nomap{position:absolute;inset:0;display:grid;place-items:center;padding:20px;text-align:center;font-size:13px;color:var(--muted)}
 .leaflet-container{font:inherit;background:var(--surface-2)}
+#routeMap .leaflet-tile-pane{filter:invert(100%) hue-rotate(180deg) brightness(.92) contrast(.88) saturate(.45)}
 .leaflet-control-attribution{background:rgba(10,14,20,.75)!important;color:var(--faint)!important;font-size:10px}
 .leaflet-control-attribution a{color:var(--muted)!important}
 .lbus{display:flex;align-items:center;gap:4px;height:24px;padding:0 7px;border-radius:12px;background:#e9eef6;color:#0a0e14;font:800 11px/1 ui-sans-serif,system-ui,sans-serif;font-variant-numeric:tabular-nums;white-space:nowrap;box-shadow:0 3px 10px rgba(0,0,0,.55);transform:translate(-50%,-50%);width:max-content;position:relative}
@@ -389,6 +393,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     <div class="about">
       <p><b>About the times.</b> All times are South African time (SAST), based on the published Gautrain S5 weekday timetable (Sandton Station ⇄ Montecasino via Bryanston).</p>
       <p><b>About live GPS.</b> Bus positions come from Gautrain's bus-location feed every 10 seconds. The feed doesn't say which route a bus is on, so the app counts a bus as an S5 when it is driving along the S5 roads in the right direction, and pairs it with the timetable trip it is closest to. Arrival estimates assume the bus keeps to the timetable's pace from where it is now. If the bus is late, “leave by” still uses the scheduled time, so you never leave later than the timetable says. If it is early, “leave by” moves earlier. Route map © OpenStreetMap contributors.</p>
+      <p><b>About traffic.</b> TomTom's typical weekday traffic for each stretch of the route, at ten times of day, stretches or shrinks the timetable's minutes for that stretch. Live arrival estimates and the small expected times use it. It's typical traffic, not today's: an accident won't show until live GPS sees the bus slow down.</p>
       <p>Regular Gautrain buses don't run on weekends or public holidays. Traffic can delay buses; if yours is late, call the Gautrain bus information line on 010 223 1098.</p>
       <p>Alerts ring while this app is open on your screen.</p>
       <p id="persistNote"></p>
@@ -423,7 +428,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
      starts  = departure time from the first stop (minutes after midnight)
      offsets = minutes from the first stop to each stop (identical for every trip) */
   const RAW = {"toMontecasino":{"stops":["Sandton Terminal","West St/Fredman Drv | Sandton (outbound)","West St/Grayston Drv | Sandton","Benmore Rd/Pam Rd | Sandton","Benmore Rd/Montagu Simpson Cres | Benmore Gardens","Outspan Rd/Benmore Rd | Sunset Acres","Ballymore Drv/Outspan Rd | Sunset Acres","Ballyclare Drv","Ballyclare Drv nr Coleraine Drv | Riverclub","Ballyoaks Office Park","Ballyclare Drv/William Nicol Drv | Country Life Park","William Nicol Drv/Ormonde St | Bryanston","Grosvenor Crossing shops","Nicolway Bryanston Mall","Parc Nicol (inbound)","Epsom Downs Mall","William Nicol Drv/Leslie Ave | Magaliessig (outbound)","Montecasino Terminal"],"offsets":[0,2,3,4,7,9,10,13,14,19,20,24,26,28,31,33,36,40],"starts":[368,378,388,398,408,418,428,438,448,458,468,478,488,498,508,518,528,538,548,568,588,608,628,648,668,688,708,728,748,768,788,808,828,848,868,888,908,918,928,938,948,958,968,978,988,998,1008,1018,1028,1038,1048,1058,1068,1078,1088,1098,1108,1118,1128,1138,1158,1178,1198,1218,1238]},"toSandton":{"stops":["Montecasino Terminal","William Nicol Drv/Monte Casino Blvd | Fourways","William Nicol Drv/Leslie Ave | Magaliessig (inbound)","Epsom Downs Mall","William Nicol Dr nr Sloane St | Epsom Downs","William Nicol Drv/Bryanston Drv | Bryanston (inbound)","Nicolway Bryanston Mall","William Nicol Drv/Grosvenor Rd | Bryanston","Ballyclare Drv/William Nicol Drv | Country Life Park","Ballyoaks Office Park","Ballyclare Drv nr Coleraine Drv | Riverclub","Ballyclare Drv","Ballymore Drv/Outspan Rd | Sunset Acres","Outspan Rd/Benmore Rd | Sunset Acres","Benmore Rd nr Waterstone Drv | Benmore Gardens","Benmore Rd/Pam Rd | Sandton","Fredman Drv/Sandown Valley Cres | Sandton","Public Transport Interchange"],"offsets":[0,1,3,6,7,9,10,13,18,20,24,25,28,29,32,34,36,40],"starts":[310,320,330,340,350,360,370,380,390,400,410,417,427,437,447,457,467,477,487,497,507,517,527,537,547,557,567,577,587,597,617,637,657,677,697,717,737,757,777,797,817,837,857,877,897,917,937,957,967,977,987,997,1007,1017,1027,1037,1047,1057,1067,1077,1087,1097,1107,1117,1127,1137,1147,1157,1167,1177,1187,1207,1227,1247,1267,1287]}};
-  const ICON_PATHS = {"bus":"<rect x=\"4\" y=\"3\" width=\"16\" height=\"14\" rx=\"3\"/><path d=\"M4 10h16\"/><path d=\"M7 21v-4M17 21v-4\"/><path d=\"M8 13.5h.01M16 13.5h.01\"/>","bell":"<path d=\"M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9\"/><path d=\"M13.73 21a2 2 0 0 1-3.46 0\"/>","gear":"<circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z\"/>","walk":"<circle cx=\"13\" cy=\"4\" r=\"2\"/><path d=\"M10 21l2-6 3 3v3\"/><path d=\"M7 12l3-4 4 1 2 4 3 1\"/><path d=\"M12 15l-1.5-6\"/>","alert":"<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 7v6\"/><path d=\"M12 17h.01\"/>","moon":"<path d=\"M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z\"/>","route":"<circle cx=\"6\" cy=\"19\" r=\"3\"/><path d=\"M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15\"/><circle cx=\"18\" cy=\"5\" r=\"3\"/>","live":"<circle cx=\"12\" cy=\"12\" r=\"2\"/><path d=\"M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14\"/>","list":"<path d=\"M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01\"/>","plan":"<rect x=\"3\" y=\"4\" width=\"18\" height=\"18\" rx=\"2\"/><path d=\"M16 2v4M8 2v4M3 10h18\"/>","phone":"<path d=\"M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z\"/>","info":"<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 16v-4\"/><path d=\"M12 8h.01\"/>","x":"<path d=\"M18 6L6 18M6 6l12 12\"/>","chev":"<path d=\"M6 9l6 6 6-6\"/>","pin":"<path d=\"M12 22s-7-6.13-7-12a7 7 0 0 1 14 0c0 5.87-7 12-7 12z\"/><circle cx=\"12\" cy=\"10\" r=\"2.5\"/>"};
+  const ICON_PATHS = {"bus":"<rect x=\"4\" y=\"3\" width=\"16\" height=\"14\" rx=\"3\"/><path d=\"M4 10h16\"/><path d=\"M7 21v-4M17 21v-4\"/><path d=\"M8 13.5h.01M16 13.5h.01\"/>","bell":"<path d=\"M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9\"/><path d=\"M13.73 21a2 2 0 0 1-3.46 0\"/>","gear":"<circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z\"/>","walk":"<circle cx=\"13\" cy=\"4\" r=\"2\"/><path d=\"M10 21l2-6 3 3v3\"/><path d=\"M7 12l3-4 4 1 2 4 3 1\"/><path d=\"M12 15l-1.5-6\"/>","alert":"<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 7v6\"/><path d=\"M12 17h.01\"/>","moon":"<path d=\"M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z\"/>","route":"<circle cx=\"6\" cy=\"19\" r=\"3\"/><path d=\"M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15\"/><circle cx=\"18\" cy=\"5\" r=\"3\"/>","live":"<circle cx=\"12\" cy=\"12\" r=\"2\"/><path d=\"M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14\"/>","list":"<path d=\"M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01\"/>","plan":"<rect x=\"3\" y=\"4\" width=\"18\" height=\"18\" rx=\"2\"/><path d=\"M16 2v4M8 2v4M3 10h18\"/>","phone":"<path d=\"M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z\"/>","info":"<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 16v-4\"/><path d=\"M12 8h.01\"/>","x":"<path d=\"M18 6L6 18M6 6l12 12\"/>","chev":"<path d=\"M6 9l6 6 6-6\"/>","traffic":"<rect x=\"7\" y=\"2\" width=\"10\" height=\"20\" rx=\"3\"/><circle cx=\"12\" cy=\"7\" r=\"1.5\"/><circle cx=\"12\" cy=\"12\" r=\"1.5\"/><circle cx=\"12\" cy=\"17\" r=\"1.5\"/>","pin":"<path d=\"M12 22s-7-6.13-7-12a7 7 0 0 1 14 0c0 5.87-7 12-7 12z\"/><circle cx=\"12\" cy=\"10\" r=\"2.5\"/>"};
 
   const MIN = 60000, DAY = 86400000, SAST = 7200000; // South Africa: UTC+2, no daylight saving
   const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -634,6 +639,61 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     return { pos: last, off: dir.offsets[last] };
   }
 
+  /* ---------- Typical traffic (TomTom) ----------
+     Driving seconds between consecutive timetable stops on a weekday, from TomTom routing with historical
+     traffic (sampled for Friday 23 Oct 2026). The timetable's minutes for each stretch are scaled by how much
+     slower or faster that stretch is at that time of day than its daily average. */
+  const TRAFFIC_AT = [330, 390, 450, 510, 630, 780, 990, 1050, 1110, 1230]; // 05:30 06:30 07:30 08:30 10:30 13:00 16:30 17:30 18:30 20:30
+  const TRAFFIC_S = {
+    toSandton: [
+      [155, 62, 92, 33, 59, 27, 92, 109, 70, 135, 19, 81, 28, 79, 64, 90, 166],
+      [187, 138, 138, 40, 80, 28, 98, 127, 88, 165, 21, 87, 30, 115, 72, 105, 215],
+      [214, 206, 195, 45, 109, 31, 110, 158, 107, 261, 30, 101, 30, 152, 86, 127, 267],
+      [183, 172, 144, 42, 119, 34, 112, 148, 95, 208, 23, 95, 30, 105, 79, 116, 221],
+      [161, 108, 111, 41, 96, 38, 109, 128, 86, 201, 21, 88, 30, 84, 71, 108, 190],
+      [161, 109, 119, 44, 92, 38, 111, 130, 88, 216, 21, 89, 30, 86, 72, 110, 198],
+      [167, 145, 186, 48, 90, 39, 121, 142, 99, 225, 22, 99, 31, 91, 88, 134, 257],
+      [164, 128, 190, 47, 88, 39, 119, 137, 94, 199, 22, 98, 31, 90, 83, 134, 245],
+      [158, 88, 153, 38, 81, 38, 109, 127, 86, 164, 21, 92, 30, 86, 73, 118, 212],
+      [154, 62, 101, 28, 63, 32, 97, 114, 74, 139, 20, 84, 29, 81, 65, 96, 173]
+    ],
+    toMontecasino: [
+      [117, 49, 33, 76, 80, 25, 68, 16, 150, 35, 120, 45, 70, 80, 48, 116, 138],
+      [127, 51, 36, 79, 89, 25, 75, 17, 159, 37, 129, 46, 73, 89, 64, 150, 156],
+      [157, 59, 46, 86, 106, 26, 101, 28, 182, 43, 136, 50, 84, 104, 76, 175, 168],
+      [163, 59, 47, 88, 104, 26, 87, 21, 182, 45, 136, 54, 87, 104, 64, 159, 171],
+      [152, 52, 39, 86, 94, 26, 77, 18, 175, 44, 138, 60, 87, 102, 54, 150, 185],
+      [159, 54, 40, 87, 99, 26, 81, 19, 184, 47, 144, 62, 88, 112, 64, 177, 198],
+      [191, 68, 52, 101, 118, 27, 90, 20, 221, 67, 161, 60, 94, 194, 167, 384, 203],
+      [200, 65, 51, 93, 108, 27, 90, 20, 205, 62, 158, 56, 91, 161, 145, 319, 200],
+      [178, 56, 45, 85, 96, 26, 84, 19, 177, 49, 144, 52, 83, 116, 84, 202, 193],
+      [136, 50, 35, 79, 83, 25, 74, 17, 155, 39, 126, 48, 74, 83, 42, 114, 163]
+    ]
+  };
+  const TRAFFIC_R = {}; // each stretch's time relative to its daily average
+  Object.keys(TRAFFIC_S).forEach(id => {
+    const rows = TRAFFIC_S[id], mean = rows[0].map((_, leg) => rows.reduce((t, r) => t + r[leg], 0) / rows.length);
+    TRAFFIC_R[id] = rows.map(r => r.map((sec, leg) => Math.min(2, Math.max(0.6, sec / mean[leg]))));
+  });
+  function trafficRatio(dirId, leg, t) {
+    const H = TRAFFIC_AT, R = TRAFFIC_R[dirId], m = ((t % 1440) + 1440) % 1440;
+    if (m <= H[0]) return R[0][leg];
+    for (let s = 0; s < H.length - 1; s++) {
+      if (m < H[s + 1]) { const f = (m - H[s]) / (H[s + 1] - H[s]); return R[s][leg] + f * (R[s + 1][leg] - R[s][leg]); }
+    }
+    return R[H.length - 1][leg];
+  }
+  // Minutes from fractional stop position p to stop k for a bus setting off at minute-of-day t, in typical traffic.
+  function runMin(dir, p, k, t) {
+    let m = 0, pos = p;
+    while (pos < k - 1e-9) {
+      const leg = Math.floor(pos + 1e-9), end = Math.min(leg + 1, k);
+      m += (dir.offsets[leg + 1] - dir.offsets[leg]) * (end - pos) * trafficRatio(dir.id, leg, t + m);
+      pos = end;
+    }
+    return m;
+  }
+
   /* ---------- Live GPS ---------- */
   // Gautrain's bus-location feed, read through a small relay that adds the headers browsers need (Supabase Edge Function "gautrain-bus").
   const FEED_URL = 'https://gkzuuwohldqbsnzmhdmx.supabase.co/functions/v1/gautrain-bus';
@@ -738,10 +798,11 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     if (!liveFresh(now)) return null;
     const bus = live.trips[dirId] && live.trips[dirId][i];
     if (!bus) return null;
-    const dir = DIRS[dirId], ok = dir.offsets[k], ds = dayStartMs(now);
+    const dir = DIRS[dirId], ok = dir.offsets[k], ds = dayStartMs(now), nowMin = (now - ds) / MIN;
     const gone = bus.at !== 'monte' && bus.pos > k + 0.25 && bus.off > ok + 0.5;
-    let etaMs = gone ? null : now + Math.max(0, ok - bus.off) * MIN; // keeps the timetable's pace from here
-    if (etaMs && bus.at === 'monte') etaMs = Math.max(etaMs, ds + (dir.starts[i] + ok) * MIN); // waits for its departure time
+    let etaMs = null;
+    if (!gone && bus.at === 'monte') { const go = Math.max(nowMin, dir.starts[i]); etaMs = ds + (go + runMin(dir, 0, k, go)) * MIN; } // waits for its departure time
+    else if (!gone) etaMs = now + runMin(dir, Math.min(bus.pos, k), k, nowMin) * MIN; // timetable pace from here, adjusted for typical traffic
     return { bus, gone, etaMs, late: etaMs ? (etaMs - (ds + (dir.starts[i] + ok) * MIN)) / MIN : bus.late, here: !gone && Math.abs(bus.pos - k) < 0.25 && bus.at !== 'monte', stopsAway: Math.max(0, Math.ceil(k - bus.pos - 0.25)) };
   }
 
@@ -749,8 +810,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   function buildTrips(dir, b, a, delay, ds) {
     const ob = dir.offsets[b], oa = dir.offsets[a], oe = dir.offsets[lastIdx(dir)];
     return dir.starts.map((s0, i) => {
-      const s = s0 + delay;
-      return { i, dayStart: ds, startMin: s, depMin: s + ob, arrMin: s + oa, endMin: s + oe, startMs: ds + s * MIN, depMs: ds + (s + ob) * MIN, arrMs: ds + (s + oa) * MIN };
+      const s = s0 + delay, pd = s + runMin(dir, 0, b, s), pa = s + runMin(dir, 0, a, s);
+      return { i, dayStart: ds, startMin: s, depMin: s + ob, arrMin: s + oa, endMin: s + oe, startMs: ds + s * MIN, depMs: ds + (s + ob) * MIN, arrMs: ds + (s + oa) * MIN, predDepMin: pd, predArrMin: pa, predDepMs: ds + pd * MIN, predArrMs: ds + pa * MIN };
     });
   }
   function busesOnRoad(dir, delay, ds, now) { // estimated position of every bus currently between the terminals
@@ -773,9 +834,11 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     const decorate = x => {
       x.live = x.dayStart === todayStart ? liveFor(dir.id, x.i, b, now) : null;
       const eta = x.live && x.live.etaMs;
-      x.effDepMs = !eta ? x.depMs : eta < x.depMs || now >= x.depMs - leadMs ? eta : x.depMs;
+      // Without live GPS, light traffic can bring the bus early (leave-by moves earlier); heavy traffic never delays it.
+      x.effDepMs = !eta ? Math.min(x.depMs, x.predDepMs) : eta < x.depMs || now >= x.depMs - leadMs ? eta : x.depMs;
+      x.expArrMs = eta ? eta + runMin(dir, b, a, (eta - x.dayStart) / MIN) * MIN : x.predArrMs;
       x.leaveMs = x.effDepMs - leadMs;
-      x.reach = now + walkMs < x.effDepMs + MIN;
+      x.reach = now + walkMs < (eta ? x.effDepMs : x.depMs) + MIN;
       x.upcoming = !(x.live && x.live.gone) && now < Math.max(x.depMs, x.live && x.live.etaMs || 0) + MIN;
       return x;
     };
@@ -960,7 +1023,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     if (lv.bus.at === 'monte') return 'Your bus is <b>waiting at ' + esc(stopTitle(dir.stops[0])) + '</b> · ' + lateHtml(lv.late) + (m.b ? at : '');
     if (lv.here) return '<b>Your bus is at your stop now</b> · ' + lateHtml(lv.late);
     const near = stopTitle(dir.stops[Math.min(lastIdx(dir), Math.floor(lv.bus.pos + 0.5))]);
-    return 'Your bus is <b>' + (lv.stopsAway ? nStops(lv.stopsAway) + ' away' : 'about to reach your stop') + '</b> · near ' + esc(near) + ' · ' + lateHtml(lv.late) + at;
+    return 'Your bus is <b>' + (lv.stopsAway ? nStops(lv.stopsAway) + ' away' : 'about to reach your stop') + '</b> · near ' + esc(near) + ' · ' + lateHtml(lv.late) + at +
+      (h.expArrMs ? ' · ' + esc(stopTitle(dir.stops[m.a])) + ' ~' + hhmmMs(h.expArrMs) : '');
   }
   function whereHtml(m) {
     if (m.mode !== 'today') return '';
@@ -976,6 +1040,17 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     if (m.b === 0) return '<div class="where">' + ICON.bus + '<span>Starts here at the terminal at <b>' + hhmm(h.startMin) + '</b>' + track + '</span></div>';
     return '<div class="where">' + ICON.bus + '<span>Leaves ' + esc(stopTitle(dir.stops[0])) + ' at <b>' + hhmm(h.startMin) + '</b> · ' + nStops(m.b) + ' before yours' + track + '</span></div>';
   }
+  const relMin = d => (d > 0 ? '+' + d + ' min' : -d + ' min early');
+  // Typical-traffic outlook for your bus when live GPS can't see it.
+  function trafficHtml(m) {
+    if (m.mode !== 'today' || m.hero.live) return '';
+    const h = m.hero, dir = m.dir, dDep = Math.round((h.predDepMs - h.depMs) / MIN), dArr = Math.round((h.predArrMs - h.arrMs) / MIN), parts = [];
+    if (m.b > 0 && Math.abs(dDep) >= 2) parts.push('at your stop ~<b>' + hhmmMs(h.predDepMs) + '</b> (' + relMin(dDep) + ')');
+    if (Math.abs(dArr) >= 2) parts.push(esc(stopTitle(dir.stops[m.a])) + ' ~<b>' + hhmmMs(h.predArrMs) + '</b> (' + relMin(dArr) + ')');
+    if (!parts.length) return '';
+    return '<div class="livebox quiet">' + ICON.traffic + '<span>In typical traffic for ' + hhmm(h.startMin) + ': ' + parts.join(' · ') + '.' +
+      (dDep <= -1 ? ' Leave-by allows for the bus coming early.' : '') + ' <em class="est">TomTom</em></span></div>';
+  }
   function heroHtml(m) {
     const h = m.hero, dir = m.dir, isToday = m.mode === 'today', lastI = dir.starts.length - 1;
     const from = stopParts(dir.stops[m.b]), to = stopParts(dir.stops[m.a]), tags = [];
@@ -988,8 +1063,9 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       '<div class="eyebrow"><span>' + (isToday ? 'Next bus you can catch' : 'Next bus · ' + esc(relDay(m.day, m.today))) + '</span>' + tags.join('') + '</div>' +
       '<div class="hero-main"><div class="hero-time">' + hhmm(h.depMin) + '</div><div class="hero-cd">' +
         (isToday && h.live && h.live.etaMs ? '<div class="lbl">live · due in</div><div class="val livev" data-to="' + h.live.etaMs + '"></div>' : '<div class="lbl">departs in</div><div class="val" data-to="' + h.depMs + '"></div>') + '</div></div>' +
-      '<div class="hero-route">from <b>' + esc(from.title) + '</b>' + (from.area ? ' · ' + esc(from.area) : '') + '<br>arrives <b>' + esc(to.title) + '</b> at <b>' + hhmm(h.arrMin) + '</b> · ' + (h.arrMin - h.depMin) + ' min ride</div>' +
-      statusHtml(m) + whereHtml(m) +
+      '<div class="hero-route">from <b>' + esc(from.title) + '</b>' + (from.area ? ' · ' + esc(from.area) : '') + '<br>arrives <b>' + esc(to.title) + '</b> at <b>' + hhmm(h.arrMin) + '</b> · ' + (h.arrMin - h.depMin) + ' min ride' +
+      (isToday && Math.abs(h.expArrMs - h.arrMs) >= 2 * MIN ? ' · <b class="expv">~' + hhmmMs(h.expArrMs) + ' expected</b>' : '') + '</div>' +
+      statusHtml(m) + whereHtml(m) + trafficHtml(m) +
       '<div class="actions">' + alertBtn + '<button class="btn" data-action="tab" data-tab="route">' + ICON.route + '<span>Track on route</span></button></div>' +
       '</article>';
   }
@@ -1060,6 +1136,13 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     const dir = m.dir, n = dir.stops.length, last = n - 1, ROW = 56, h = m.hero, isToday = m.mode === 'today';
     const buses = railBuses(m), mine = isToday ? buses.find(x => x.you) : null;
     const y = pos => Math.round((pos * ROW + ROW / 2) * 2) / 2;
+    // When your bus should really reach each stop: from live GPS if it has your bus, otherwise typical traffic.
+    const lvBus = isToday && h.live ? h.live.bus : null, nowMin = (m.now - m.todayStart) / MIN, ds = isToday ? m.todayStart : m.day.start;
+    const expAt = k => {
+      if (lvBus && lvBus.at !== 'monte') return k < lvBus.pos ? null : m.now + runMin(dir, lvBus.pos, k, nowMin) * MIN;
+      const go = lvBus ? Math.max(nowMin, h.startMin) : h.startMin;
+      return ds + (go + runMin(dir, 0, k, go)) * MIN;
+    };
     const rows = dir.stops.map((raw, k) => {
       const p = stopParts(raw), cls = ['stop'];
       if (k === 0 || k === last) cls.push('term');
@@ -1067,8 +1150,12 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       if (k === m.b) cls.push('board');
       if (k === m.a) cls.push('alight');
       const flag = k === m.b ? '<span class="flag board">BOARD</span>' : k === m.a ? '<span class="flag alight">GET OFF</span>' : '';
-      return '<div class="' + cls.join(' ') + '" style="top:' + (k * ROW) + 'px"><span class="node"></span><div class="stxt"><div class="nm">' + esc(p.title) + flag + '</div>' + (p.area ? '<div class="ar">' + esc(p.area) + '</div>' : '') + '</div><div class="tm">' + hhmm(h.startMin + dir.offsets[k]) + '</div></div>';
+      return '<div class="' + cls.join(' ') + '" style="top:' + (k * ROW) + 'px"><span class="node"></span><div class="stxt"><div class="nm">' + esc(p.title) + flag + '</div>' + (p.area ? '<div class="ar">' + esc(p.area) + '</div>' : '') + '</div><div class="tm">' + hhmm(h.startMin + dir.offsets[k]) + expTag(k) + '</div></div>';
     }).join('');
+    function expTag(k) {
+      const e = expAt(k), sched = ds + (h.startMin + dir.offsets[k]) * MIN;
+      return e != null && Math.abs(e - sched) >= MIN ? '<small class="exp' + (lvBus ? ' lv' : '') + '">~' + hhmmMs(e) + '</small>' : '';
+    }
     let markers = buses.map(x => {
       const cls = 'bus' + (x.you ? ' you' : '') + (x.live ? ' live' : x.est ? ' est' : '');
       const what = (x.you ? 'Your bus' : 'S5 bus') + (x.i != null ? ' that left at ' + x.label : '') + ', near ' + stopTitle(x.near) + (x.live ? ' (live GPS)' : ' (estimated from the timetable)');
@@ -1080,7 +1167,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     const done = mine ? '<div class="rail-done" style="top:' + y(0) + 'px;height:' + Math.max(0, y(mine.pos) - y(0)) + 'px"></div>' : '';
     return '<div class="track-cap"><span>Stop</span><span>' + (isToday ? 'Your ' + hhmm(h.depMin) + ' bus' : 'First bus') + '</span></div>' +
       '<div class="track" style="height:' + (n * ROW) + 'px"><div class="rail" style="top:' + y(0) + 'px;height:' + (last * ROW) + 'px"></div>' + done + rows + markers + '</div>' +
-      '<p class="foot">' + (m.liveOn ? 'Buses with a green dot are live GPS positions. Dashed ones are estimated from the timetable, because live GPS can\'t see them.' : 'Positions are estimated from the timetable' + (state.delay ? ' (shifted +' + state.delay + ' min)' : '') + '.') + ' Stop times are for your bus as scheduled. Where\'s my bus? Call ' + INFO_LINE + '.</p>';
+      '<p class="foot">' + (m.liveOn ? 'Buses with a green dot are live GPS positions. Dashed ones are estimated from the timetable, because live GPS can\'t see them.' : 'Positions are estimated from the timetable' + (state.delay ? ' (shifted +' + state.delay + ' min)' : '') + '.') + ' Stop times are for your bus as scheduled; the small time under one is when it should really get there' + (lvBus ? ' (live GPS)' : ' in typical traffic (TomTom)') + '. Where\'s my bus? Call ' + INFO_LINE + '.</p>';
   }
 
   /* ---------- Live map ---------- */
@@ -1090,9 +1177,10 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     if (lmap) return true;
     if (!window.L) return false;
     lmap = window.L.map('routeMap', { zoomControl: false, attributionControl: true, zoomSnap: 0.25, zoomDelta: 0.5 });
-    window.L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      subdomains: 'abcd', maxZoom: 19,
-      attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · © <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>'
+    // OpenStreetMap's standard tiles, darkened with a CSS filter to match the app (no API key needed).
+    window.L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
     }).addTo(lmap);
     routeLayer = window.L.layerGroup().addTo(lmap);
     busLayer = window.L.layerGroup().addTo(lmap);
@@ -1194,12 +1282,15 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     if (T == null) return '<p class="muted">Pick a time to plan your trip.</p>';
     const trips = buildTrips(dir, m.b, m.a, 0, 0), lead = state.walk + state.buffer;
     const fromT = esc(stopTitle(dir.stops[m.b])), toT = esc(stopTitle(dir.stops[m.a]));
-    let pick, alt, altLabel, headline;
+    let pick, alt, altLabel, headline, warn = null;
     if (state.planMode === 'arrive') {
       const ok = trips.filter(x => x.arrMin <= T);
       if (!ok.length) return '<div class="plan-out"><p class="muted">No S5 bus reaches ' + toT + ' by ' + hhmm(T) + '. The first bus of the day arrives at <b>' + hhmm(trips[0].arrMin) + '</b>.</p></div>';
       pick = ok[ok.length - 1]; alt = ok.length > 1 ? ok[ok.length - 2] : null; altLabel = 'Safer option';
-      headline = 'Take the ' + hhmm(pick.depMin) + ' bus — arrives ' + (T - pick.arrMin ? (T - pick.arrMin) + ' min early' : 'right on time');
+      // In typical traffic the scheduled pick may arrive late; then recommend the latest bus that typically makes it.
+      const safe = trips.filter(x => x.predArrMin <= T + 0.5);
+      if (pick.predArrMin > T + 0.5 && safe.length) { warn = { late: pick }; alt = pick; pick = safe[safe.length - 1]; altLabel = 'Cutting it fine'; }
+      headline = 'Take the ' + hhmm(pick.depMin) + ' bus — ' + (warn ? 'typically arrives ~' + hhmm(pick.predArrMin) : 'arrives ' + (T - pick.arrMin ? (T - pick.arrMin) + ' min early' : 'right on time'));
     } else {
       const ok = trips.filter(x => x.depMin - lead >= T);
       if (!ok.length) return '<div class="plan-out"><p class="muted">No S5 bus you can catch after ' + hhmm(T) + '. The last bus leaves ' + fromT + ' at <b>' + hhmm(trips[trips.length - 1].depMin) + '</b>.</p></div>';
@@ -1209,7 +1300,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     const steps = [['', pick.depMin - lead, 'Leave', state.walk ? state.walk + ' min walk to the stop' : 'Already at the stop']];
     if (state.buffer) steps.push(['', pick.depMin - state.buffer, 'Be at ' + fromT, state.buffer + ' min before the bus']);
     steps.push(['bus-step', pick.depMin, 'S5 bus departs', dir.label]);
-    steps.push(['end-step', pick.arrMin, 'Arrive ' + toT, (pick.arrMin - pick.depMin) + ' min ride']);
+    const dPred = Math.round(pick.predArrMin - pick.arrMin);
+    steps.push(['end-step', pick.arrMin, 'Arrive ' + toT, (pick.arrMin - pick.depMin) + ' min ride' + (Math.abs(dPred) >= 2 ? ' · ~' + hhmm(pick.predArrMin) + ' in typical traffic' : '')]);
     let btn = '';
     if (m.today.service) {
       const on = !!findAlert(alertKey(dir.id, m.b, pick.i, m.todayStart));
@@ -1218,7 +1310,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     }
     return '<div class="plan-out"><h4>' + headline + '</h4><div class="sub">From ' + fromT + ' · scheduled weekday times</div>' +
       '<ol class="journey">' + steps.map(s => '<li class="' + s[0] + '"><span class="jt">' + hhmm(s[1]) + '</span><span class="jd"></span><span class="jx">' + s[2] + '<small>' + s[3] + '</small></span></li>').join('') + '</ol>' +
-      (alt ? '<div class="backup">' + altLabel + ': the <b>' + hhmm(alt.depMin) + '</b> bus, arriving <b>' + hhmm(alt.arrMin) + '</b> (leave by ' + hhmm(alt.depMin - lead) + ').</div>' : '') + btn + '</div>';
+      (warn ? '<div class="backup">' + ICON.traffic.replace('<svg', '<svg style="display:inline;width:15px;height:15px;vertical-align:-3px;color:var(--amber)"') + ' The <b>' + hhmm(warn.late.depMin) + '</b> is timetabled to arrive at ' + hhmm(warn.late.arrMin) + ', but in typical traffic it gets there ~<b>' + hhmm(warn.late.predArrMin) + '</b> — after ' + hhmm(T) + '. That\'s why this plan picks an earlier bus.</div>' : '') +
+      (alt ? '<div class="backup" style="margin-top:8px">' + altLabel + ': the <b>' + hhmm(alt.depMin) + '</b> bus, arriving <b>' + hhmm(alt.arrMin) + '</b>' + (Math.abs(alt.predArrMin - alt.arrMin) >= 2 ? ' (~' + hhmm(alt.predArrMin) + ' in typical traffic)' : '') + ' (leave by ' + hhmm(alt.depMin - lead) + ').</div>' : '') + btn + '</div>';
   }
   function alertsListHtml() {
     if (!state.alerts.length) return '<p class="muted">No alerts set yet. Tap <b>Alert me</b> on any bus and the app will ring when it\'s time to leave.</p>';
@@ -1414,7 +1507,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { keepAwake(); pollLive(); tick(true); } });
 
-  window.S5Tracker = { DIRS, state, computeModel, buildTrips, busesOnRoad, dayInfo, holidays, fmtDur, hhmm, tick, live, OSM_D, LOOP_M, pollLive };
+  window.S5Tracker = { DIRS, state, computeModel, buildTrips, busesOnRoad, dayInfo, holidays, fmtDur, hhmm, tick, live, OSM_D, LOOP_M, pollLive, runMin, planHtml };
   renderStatic();
   setTab('live');
   setInterval(tick, 1000);

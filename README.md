@@ -16,5 +16,9 @@ How live GPS works:
 - The feed doesn't say which route a bus is on. The app snaps each bus to the S5 road line, taking
   its direction into account, and pairs it with the nearest timetable trip.
 - An early bus brings "leave by" forward. A late one only moves it back once the scheduled leave time has passed.
-- The route line and stop positions come from OpenStreetMap route relation 3281475 (© OpenStreetMap
-  contributors, ODbL). Map tiles © CARTO.
+- Arrival estimates use TomTom's typical weekday traffic for each stretch of the route (sampled at ten times
+  of day with TomTom routing, historical traffic). Each stretch's timetable minutes are scaled by how much slower or
+  faster it is than its daily average, for live arrival times and for the "expected" times when live GPS
+  can't see a bus. "Arrive by" plans pick a bus that typically makes it.
+- The route line and stop positions come from OpenStreetMap route relation 3281475, and the map tiles are
+  OpenStreetMap's (© OpenStreetMap contributors, ODbL).
