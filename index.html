@@ -377,6 +377,16 @@ function setCustom(ll) {
 meMarker.on("dragend", e => { const p = e.target.getLatLng(); setCustom([p.lat, p.lng]); });
 map.on("click", e => { if (cfg.stop === "custom") setCustom([e.latlng.lat, e.latlng.lng]); });
 
+// Keep both stops and my pin in view as the bottom sheet grows or shrinks, until the user moves the map.
+let autoFit = true;
+const stopAutoFit = () => { autoFit = false; };
+function fitStops() { map.fitBounds([STOPS.sandton.ll, STOPS.monte.ll, myStop()], { padding: [40, 40] }); }
+map.on("dragstart dblclick", stopAutoFit);
+map.getContainer().addEventListener("wheel", stopAutoFit, { passive: true });
+map.getContainer().addEventListener("touchstart", e => { if (e.touches.length > 1) stopAutoFit(); }, { passive: true });
+document.querySelector(".leaflet-control-zoom").addEventListener("click", stopAutoFit);
+new ResizeObserver(() => { map.invalidateSize(); if (autoFit) fitStops(); }).observe(map.getContainer());
+
 // ---------- live state ----------
 const buses = new Map();      // key → bus state
 let lastOk = 0, lastErr = null, routeInfoSeen = false, fetching = false, pollTimer = null;
@@ -654,7 +664,7 @@ $("alertsBtn").addEventListener("click", () => (alertsOn ? disableAlerts() : ena
 $("locate").addEventListener("click", () => {
   if (!navigator.geolocation) return;
   navigator.geolocation.getCurrentPosition(
-    p => { setCustom([p.coords.latitude, p.coords.longitude]); map.setView(cfg.custom, 15); },
+    p => { setCustom([p.coords.latitude, p.coords.longitude]); stopAutoFit(); map.setView(cfg.custom, 15); },
     () => alert("Couldn't get your location. Choose \"Pin on map\" and tap your stop instead."),
     { enableHighAccuracy: true, timeout: 10000 });
 });
@@ -689,7 +699,6 @@ $("settings").addEventListener("close", () => {
 
 syncAlertBtn();
 placeMe();
-requestAnimationFrame(() => { map.invalidateSize(); map.fitBounds([STOPS.sandton.ll, STOPS.monte.ll], { padding: [40, 40] }); });
 startPolling();
 </script>
 </body>
