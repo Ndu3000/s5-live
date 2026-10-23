@@ -1518,7 +1518,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       ];
       if (p.end) steps.push(['end-step', p.arrive, esc(p.end.name), 'ride about ' + Math.round(p.ride) + ' min' + est(p)]);
       actions = !p.end ? '<button class="btn primary" data-action="settings">' + ICON.pin + '<span>Add where you go on to</span></button>'
-        : '<button class="btn ' + (remindOn(p.bookBy) ? 'armed' : 'primary') + '" data-action="remind" data-at="' + p.bookBy + '" data-what="pm" data-to="' + esc(p.end.name) + '">' + ICON.bell + '<span>' + (remindOn(p.bookBy) ? 'Reminder set' : 'Remind me to book') + '</span></button>' +
+        : '<button class="btn ' + (remindOn(p.bookBy) ? 'armed' : 'primary') + '" data-action="remind" data-at="' + p.bookBy + '" data-what="pm" data-dest="' + esc(p.end.name) + '">' + ICON.bell + '<span>' + (remindOn(p.bookBy) ? 'Reminder set' : 'Remind me to book') + '</span></button>' +
           '<a class="btn" href="' + esc(uberLink(p.end, p.end.name)) + '" target="_blank" rel="noopener">' + ICON.pin + '<span>Open Uber</span></a>';
       if (p.mon.ms > sunset) notes.push('It\'ll be dark when you reach Montecasino: book before you get off, and wait in a well-lit spot at the pickup point until your driver arrives.');
       const lc = lastConnection(m.todayStart);
@@ -1924,7 +1924,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       case 'dismiss-alarm': dismissAlarm(); break;
       case 'test-alarm': testAlarm(); break;
       case 'remind': {
-        const at = Number(d.at), am = d.what === 'am', to = d.to || 'your destination';
+        const at = Number(d.at), am = d.what === 'am', to = d.dest || 'your destination';
         setReminder(at, am ? 'Book your ride to Montecasino' : 'Book your ride to ' + to,
           am ? 'Book your Uber/Bolt to <b>Montecasino</b> now to make your S5 and train to Midrand.' : 'Your S5 reaches <b>Montecasino</b> in a few minutes. Book your ride to <b>' + esc(to) + '</b> now so it\'s waiting when you get off.');
         break;

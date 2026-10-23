@@ -49,10 +49,13 @@ function nextWeekday(min: number) {
   return `${d.toISOString().slice(0, 10)}T${hh}:${mm}:00+02:00`;
 }
 
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 async function driveMin(a: [number, number], b: [number, number], min: number) {
   const url = `https://api.tomtom.com/routing/1/calculateRoute/${a[0]},${a[1]}:${b[0]},${b[1]}/json?key=${encodeURIComponent(KEY)}` +
     `&traffic=true&routeType=fastest&departAt=${encodeURIComponent(nextWeekday(min))}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  let res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  if (res.status === 429) { await pause(1500); res = await fetch(url, { signal: AbortSignal.timeout(10000) }); } // over the per-second limit
   if (!res.ok) throw new Error(`TomTom HTTP ${res.status}`);
   const s = (await res.json()).routes?.[0]?.summary;
   if (!s) throw new Error("TomTom sent no route");
@@ -65,9 +68,9 @@ async function rides(body: any) {
   const ok = (t: unknown) => Array.isArray(t) && t.length <= 6 && t.every((m) => Number.isInteger(m) && m >= 0 && m < 1440);
   if (!ok(to) || !ok(from)) return json({ error: "to and from must be up to 6 times, in minutes after midnight" }, 400);
   const place: [number, number] = [+p[0].toFixed(5), +p[1].toFixed(5)], out = { to: [] as number[][], from: [] as number[][] };
-  // One at a time, to stay inside TomTom's requests-per-second limit.
-  for (const t of to) out.to.push([t, await driveMin(place, MONTE, t)]);
-  for (const t of from) out.from.push([t, await driveMin(MONTE, place, t)]);
+  // One at a time and ~300 ms apart: TomTom's free plan allows only a few requests per second.
+  for (const t of to) { out.to.push([t, await driveMin(place, MONTE, t)]); await pause(300); }
+  for (const t of from) { out.from.push([t, await driveMin(MONTE, place, t)]); await pause(300); }
   return json(out);
 }
 
