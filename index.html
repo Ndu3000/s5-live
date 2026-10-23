@@ -219,7 +219,7 @@ select option{background:#121a24;color:#eef2f7}
 .livebar.on .d{background:var(--green);box-shadow:0 0 0 4px rgba(61,220,151,.18)}
 .livebar.err .d{background:var(--red)}
 .livebar b{color:var(--text)}
-.mapcard{position:relative;margin-top:12px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--surface-2)}
+.mapcard{position:relative;isolation:isolate;margin-top:12px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--surface-2)}
 #routeMap{height:300px;background:var(--surface-2)}
 .mapcard.tall #routeMap{height:62vh}
 .mapcard .mapbtns{position:absolute;inset-inline-end:10px;top:10px;z-index:500;display:flex;flex-direction:column;gap:6px}
@@ -293,7 +293,7 @@ input[type=time]{width:100%;background:var(--surface-2);border:1px solid var(--l
 .sheet-head + .set-row{border-top:0}
 .set-row .lbl{display:flex;justify-content:space-between;gap:10px;font-weight:650;font-size:14px}
 .set-row output{color:var(--gold);font-weight:800;font-variant-numeric:tabular-nums}
-.hint{font-size:12px;color:var(--muted);margin-top:3px}
+.hint{font-size:12px;font-weight:400;color:var(--muted);margin-top:3px}
 input[type=range]{width:100%;margin:10px 0 0;accent-color:var(--gold)}
 .switch{display:flex;justify-content:space-between;align-items:center;gap:12px;font-weight:650;font-size:14px}
 input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
@@ -1271,6 +1271,28 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     toast(p.name + ' deleted'); refresh();
   }
 
+  // "Save where I am now": a precise fix first; if that is slow or unavailable (indoors, GPS off), a quicker approximate
+  // one. When both fail, say why and how to fix it, next to the button rather than in a toast that vanishes.
+  function locateAndSave() {
+    const box = $('placeResults'), say = html => { box.innerHTML = '<div class="hint">' + html + '</div>'; };
+    if (!navigator.geolocation) { say('This browser can\'t share your location. Search for the address instead.'); return; }
+    say('Finding your location…');
+    const save = pos => {
+      const p = upsertPlace($('placeName').value, pos.coords.latitude, pos.coords.longitude), acc = pos.coords.accuracy;
+      if (!p) { box.innerHTML = ''; return; }
+      $('placeName').value = '';
+      say('<b>' + esc(p.name) + '</b> saved on this phone' + (acc > 300 ? ', but only to about ' + (Math.round(acc / 100) * 100) + ' m. For a better point, search for the address.' : '.'));
+      toast(p.name + ' saved on this device'); refresh();
+    };
+    const fail = err => say(err && err.code === 1
+      ? '<b>Location is blocked for this site.</b> On iPhone: Settings → Privacy &amp; Security → Location Services → turn it on, then Safari Websites → While Using the App. On Android: tap the icon left of the address bar → Permissions → Location. Then try again, or search for the address.'
+      : '<b>Couldn\'t get a location fix.</b> Check that Location Services are on, try near a window, or search for the address instead.');
+    navigator.geolocation.getCurrentPosition(save, err => {
+      if (err && err.code === 1) { fail(err); return; }
+      navigator.geolocation.getCurrentPosition(save, fail, { enableHighAccuracy: false, timeout: 20000, maximumAge: 300000 });
+    }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+  }
+
   // Address search with OpenStreetMap's Nominatim (free, no key): only when asked, at most once a second.
   let searchAt = 0;
   const placeOption = (lat, lon, label) => !inSA(lat, lon) ? '' : '<button class="place" data-action="place-pick" data-lat="' + lat + '" data-lon="' + lon + '" data-label="' + esc(String(label).split(',')[0]) + '"><b>' + esc(label) + '</b><small>Save</small></button>';
@@ -2015,13 +2037,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
           am ? 'Book your Uber/Bolt to <b>Montecasino</b> now to make your S5 and train to Midrand.' : 'Your S5 reaches <b>Montecasino</b> in a few minutes. Book your ride to <b>' + esc(to) + '</b> now so it\'s waiting when you get off.');
         break;
       }
-      case 'place-here':
-        if (!navigator.geolocation) { toast('Location is not available here'); break; }
-        navigator.geolocation.getCurrentPosition(pos => {
-          const p = upsertPlace($('placeName').value, pos.coords.latitude, pos.coords.longitude);
-          if (p) { $('placeName').value = ''; toast(p.name + ' saved on this device'); refresh(); }
-        }, () => toast('Couldn\'t get your location'), { enableHighAccuracy: true, timeout: 10000 });
-        break;
+      case 'place-here': locateAndSave(); break;
       case 'place-search': searchPlaces($('placeQuery').value); break;
       case 'place-pick': {
         const p = upsertPlace($('placeName').value || d.label, Number(d.lat), Number(d.lon));
