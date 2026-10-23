@@ -81,3 +81,62 @@ revoke all on function public.s5_share_trip_end(uuid, text, float8, float8, text
   from public;
 grant execute on function public.s5_share_trip_end(uuid, text, float8, float8, text), public.s5_forget_trip_ends(uuid, text)
   to anon, authenticated;
+
+-- Where and when the S5 should grow, from the shared trip ends (and the departure log). Owner-only.
+-- Zones are ~2 km squares; zones with fewer than p_min_phones phones are left out, so no single person shows.
+--   kind = 'coverage': demand by zone, how far it is from the S5, and what kind of expansion would serve it.
+--   kind = 'service':  demand by departure hour against the S5 departures in that hour and how reliably they ran.
+create or replace function public.s5_expansion_report(p_min_phones int default 3)
+returns table (kind text, zone text, phones bigint, first_mile bigint, last_mile bigint, nearest_s5_stop_km numeric,
+               detail text, suggestion text)
+language sql stable
+security definer
+set search_path = public
+as $$
+  with z as (
+    select round(lat / 0.02) * 0.02 as zlat, round(lon / 0.02) * 0.02 as zlon, role, device, usual_time, lat, lon
+    from public.s5_trip_ends
+  ), zones as (
+    select zlat, zlon, count(distinct device) as phones,
+      count(*) filter (where role = 'first_mile') as first_mile, count(*) filter (where role = 'last_mile') as last_mile,
+      avg(lat)::float8 as clat, avg(lon)::float8 as clon
+    from z group by zlat, zlon
+  ), coverage as (
+    select 'coverage'::text as kind, to_char(zlat, 'FM990.00') || ', ' || to_char(zlon, 'FM990.00') as zone, phones, first_mile, last_mile,
+      round((select min(public.s5_dist_m(clat, clon, s.lat, s.lon)) from public.s5_stops() s)::numeric / 1000, 1) as km,
+      -- compass direction from Montecasino, to group zones into corridors a new route could follow
+      (array['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'])[
+        (round(((degrees(atan2(clon - 28.0114, clat - -26.02466)) + 360)::numeric % 360) / 45)::int % 8) + 1] as dir
+    from zones where phones >= p_min_phones
+  ), hours as (
+    select extract(hour from usual_time)::int as h, count(distinct device) as phones
+    from public.s5_trip_ends where role = 'first_mile' and usual_time is not null group by 1
+  ), runs as (
+    select extract(hour from scheduled)::int as h, count(*) as logged,
+      count(*) filter (where status = 'did not run') as missed, round(avg(late_min) filter (where status <> 'did not run'), 1) as late
+    from public.s5_departure_history where dir = 'toSandton' and scheduled is not null
+      and day > (now() at time zone 'Africa/Johannesburg')::date - 30 group by 1
+  ), service as (
+    select 'service'::text, lpad(h::text, 2, '0') || ':00–' || lpad(h::text, 2, '0') || ':59', hours.phones, hours.phones, 0::bigint, null::numeric,
+      -- people usually set off from home ~15 min before their S5, so look at the S5 departures in that hour
+      (select count(*) from unnest(public.s5_monte_timetable()) t where t / 60 = h) || ' S5 departures from Montecasino' ||
+        coalesce('; last 30 days: ' || r.missed || ' of ' || r.logged || ' did not run, ' || coalesce(r.late, 0) || ' min late on average', ''),
+      case
+        when (select count(*) from unnest(public.s5_monte_timetable()) t where t / 60 = h) = 0 then 'add service: no S5 leaves in this hour'
+        when r.logged >= 10 and r.missed::numeric / r.logged >= 0.1 then 'reliability first: 1 in ' || round(r.logged::numeric / greatest(r.missed, 1)) || ' runs missing'
+        when (select count(*) from unnest(public.s5_monte_timetable()) t where t / 60 = h) <= 3 then 'more frequent service: only every 20 min'
+        else 'served: a bus every 10 min'
+      end
+    from hours left join runs r using (h) where hours.phones >= p_min_phones
+  )
+  select kind, zone, phones, first_mile, last_mile, km,
+    km || ' km from the nearest S5 stop, ' || dir || ' of Montecasino',
+    case when km <= 0.6 then 'served: within walking distance of an S5 stop'
+         when km <= 2 then 'extra S5 stop or a short detour'
+         else 'feeder or new route heading ' || dir || ' from Montecasino' end
+  from coverage
+  union all
+  select * from service
+  order by 1, 3 desc, 6 desc nulls last
+$$;
+revoke all on function public.s5_expansion_report(int) from public, anon, authenticated;

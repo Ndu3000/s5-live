@@ -37,8 +37,12 @@ How live GPS works:
 - Saved places stay on your phone. Their ride times to and from the S5 come from TomTom (typical weekday
   traffic) through the `s5-traffic` relay once per place, and are kept on the phone for 30 days.
 - Help plan new routes (off by default): shares where your commute starts and ends, snapped to a ~500 m grid,
-  without names, under a random id, so demand can be mapped against the S5 (`supabase/trip-ends.sql`,
-  view `s5_demand_cells`). Turning it off deletes what was shared.
+  without names, under a random id, so demand can be mapped against the S5 (`supabase/trip-ends.sql`).
+  Turning it off deletes what was shared. For the project owner, `select * from s5_expansion_report();` ranks
+  where the S5 should grow: ~2 km zones by phones, distance to the nearest S5 stop and the kind of expansion
+  (walkable, extra stop or detour, feeder or new route, with its direction), and departure hours by demand against
+  the S5's frequency and reliability (add service, run more often, fix missing runs). Zones and hours with fewer
+  than 3 phones are left out.
 - Without a TomTom key, Gautrain's own buses are the traffic sensors: each S5 bus's progress over the last 3-6
   minutes, against what the timetable expects in typical traffic, sets a live factor for the stretches it drove
   (kept for 15 minutes).
@@ -69,7 +73,7 @@ flowchart TB
       hist[("s5_departure_history")]
       rel["s5_reliability<br/>public read-only summary"]
       ends[("s5_trip_ends<br/>opt-in, ~500 m grid, no names")]
-      demand["s5_demand_cells<br/>owner-only analysis"]
+      demand["s5_demand_cells, s5_expansion_report<br/>owner-only analysis"]
     end
   end
 
@@ -105,7 +109,7 @@ flowchart TB
   hist --> rel
   awake -->|"every 2 days"| rpc
   ends --> demand --> owner
-  log -.->|"service reliability"| owner
+  hist -.->|"reliability by hour"| demand
 ```
 
 ## Architecture decisions
@@ -183,7 +187,9 @@ To see where people travel from and where new routes, extra stops or feeder serv
 share each commute's start and end. It does so only with "Help plan new routes" switched on (off by default).
 The phone snaps each point to a ~500 m grid and sends no names. Each phone has one row per trip end under a
 random id, updated in place, so there is no movement history. Switching it off deletes the rows. The public can
-write and delete only; `s5_demand_cells` (phones per cell, usual start time, distance to the nearest S5 stop)
-is readable only by the project owner. *Why:* demand data for planning with the least personal data that still
+write and delete only. The project owner alone can read `s5_demand_cells` (phones per cell, usual start time,
+distance to the nearest S5 stop) and `s5_expansion_report()`, which turns them into ranked suggestions: where a
+stop, detour, feeder or new route would serve the most people, and which hours need more, earlier or more
+reliable service (using the departure log). Groups smaller than 3 phones are left out. *Why:* demand data for planning with the least personal data that still
 answers the question; a 500 m cell is enough to compare against a bus stop's walking catchment. *Cost:* only
 people who opt in are counted, so the map shows relative demand, not totals.
