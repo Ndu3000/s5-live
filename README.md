@@ -27,6 +27,10 @@ How live GPS works:
   project through its REST API (`supabase/backup-relays.sql`). The TomTom key can be stored either as the
   `TOMTOM_API_KEY` Edge Function secret or in Supabase Vault as `tomtom_api_key`. A scheduled GitHub workflow
   calls the project every two days so Supabase doesn't pause it for inactivity.
+- Departure log: on weekdays the Supabase project saves the S5 buses' GPS every 30 seconds and works out, for
+  every timetabled departure from Montecasino and from Sandton Station, whether a bus left, how late, and when it
+  arrived (`supabase/departure-log.sql`). The app warns when a departure has no bus on live GPS, and the timetable
+  marks departures that often don't run or leave late (`public.s5_reliability`).
 - Without a TomTom key, Gautrain's own buses are the traffic sensors: each S5 bus's progress over the last 3-6
   minutes, against what the timetable expects in typical traffic, sets a live factor for the stretches it drove
   (kept for 15 minutes).
