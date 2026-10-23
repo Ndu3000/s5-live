@@ -7,6 +7,9 @@ Never miss the Gautrain S5 bus between Sandton Station and Montecasino. Open it 
 - **Route**: a live map of the S5 with every bus on it, plus the stop-by-stop list with times.
 - **Timetable** and **Plan**: the weekday timetable from any stop, and "arrive by" / "leave after" planning.
 - Alerts ring (sound, vibration, notification) when it's time to leave. Keep the page open on screen.
+- **My commute** (turn it on in Settings): door to door with a ride (Uber/Bolt) to the S5, the S5 and the Gautrain,
+  and back. You choose where the morning starts (first mile) and where the evening ends (last mile) from your saved
+  places: add one by searching an address, pasting coordinates, or "Save where I am now".
 
 How live GPS works:
 
@@ -31,6 +34,11 @@ How live GPS works:
   every timetabled departure from Montecasino and from Sandton Station, whether a bus left, how late, and when it
   arrived (`supabase/departure-log.sql`). The app warns when a departure has no bus on live GPS, and the timetable
   marks departures that often don't run or leave late (`public.s5_reliability`).
+- Saved places stay on your phone. Their ride times to and from the S5 come from TomTom (typical weekday
+  traffic) through the `s5-traffic` relay once per place, and are kept on the phone for 30 days.
+- Help plan new routes (off by default): shares where your commute starts and ends, snapped to a ~500 m grid,
+  without names, under a random id, so demand can be mapped against the S5 (`supabase/trip-ends.sql`,
+  view `s5_demand_cells`). Turning it off deletes what was shared.
 - Without a TomTom key, Gautrain's own buses are the traffic sensors: each S5 bus's progress over the last 3-6
   minutes, against what the timetable expects in typical traffic, sets a live factor for the stretches it drove
   (kept for 15 minutes).
@@ -48,7 +56,7 @@ flowchart TB
 
   subgraph phone["Your phone"]
     app["S5 Bus Tracker<br/>index.html, one static page<br/>Leaflet map, timetable, alerts"]
-    store[("Browser storage<br/>settings, alerts, home location")]
+    store[("Browser storage<br/>settings, alerts, saved places,<br/>ride times per place")]
   end
 
   subgraph supa["Supabase"]
@@ -60,6 +68,8 @@ flowchart TB
       log[("Departure log<br/>s5_pos_log, s5_log_beat")]
       hist[("s5_departure_history")]
       rel["s5_reliability<br/>public read-only summary"]
+      ends[("s5_trip_ends<br/>opt-in, ~500 m grid, no names")]
+      demand["s5_demand_cells<br/>owner-only analysis"]
     end
   end
 
@@ -68,7 +78,9 @@ flowchart TB
     tomtom["TomTom Routing API"]
     osm["OpenStreetMap tiles"]
     uber["Uber app"]
+    nominatim["OpenStreetMap Nominatim<br/>address search"]
   end
+  owner(["Project owner<br/>route-expansion analysis"])
 
   pages -->|"loads the page"| app
   app <-->|"saved on the device"| store
@@ -78,6 +90,9 @@ flowchart TB
   app -->|"departure record, every 6 h"| rel
   app -->|"map tiles"| osm
   app -.->|"commute card deep link"| uber
+  app -.->|"place search, when asked"| nominatim
+  app -->|"ride times for a saved place, once"| trafn
+  app -.->|"opt-in: commute start and end"| ends
 
   busfn --> gautrain
   trafn --> tomtom
@@ -89,6 +104,8 @@ flowchart TB
   log -->|"departures worked out"| hist
   hist --> rel
   awake -->|"every 2 days"| rpc
+  ends --> demand --> owner
+  log -.->|"service reliability"| owner
 ```
 
 ## Architecture decisions
@@ -141,13 +158,32 @@ nothing has to stay running on a phone or a server. *Safeguards:* `s5_log_beat` 
 sent new positions, so a gap in Gautrain's feed shows as "no data" rather than "did not run". Only
 `s5_reliability` (a per-departure summary) can be read publicly.
 
-**ADR 8: Personal data stays on the device.**
-Your home location, commute settings and alerts are stored in the browser (`localStorage`). They are set
-through Settings or a private setup link (`#commute=1&home=…`), which removes itself from the address bar.
-*Why:* the repository and the site are public, so nothing personal goes into code, URLs or the database. *Cost:*
-settings don't follow you to another device.
+**ADR 8: Personal data stays on the device by default.**
+Saved places, commute settings and alerts are stored in the browser (`localStorage`). Nothing about a person is
+hard-coded: places are added in Settings or through a private setup link (`#commute=1&place=Home@lat,lon&from=Home&to=Home`),
+which removes itself from the address bar. *Why:* the repository and the site are public. *Cost:* settings don't
+follow you to another device. The only exceptions are the ride-time lookup (ADR 10) and opt-in sharing (ADR 11).
 
 **ADR 9: Alerts run in the page, without push notifications.**
 Alerts use sound, vibration, a system notification and a screen wake lock while the page is open.
 *Why:* push notifications would need user accounts and a push service, which is too much for a single-route
 tracker. *Cost:* the page has to stay open on screen for an alert to ring.
+
+**ADR 10: First and last mile from saved places, with TomTom ride times.**
+The commute card plans a ride from any saved place to the S5 and from the S5 to any saved place, instead of one
+home point. Each place's driving times (five times of day each way, typical weekday traffic) are asked from
+TomTom once, through `s5-traffic`, and kept on the phone for 30 days; until then the card shows a labelled
+estimate from the distance. *Why:* times that match the place and the time of day, with the TomTom key kept on
+the server. *Privacy:* the place travels in the request body (request logs only record the URL), and the relay
+stores nothing. *Cost:* 10 TomTom requests per new place. Address search uses OpenStreetMap's Nominatim: free,
+no key, and only when the user taps Search.
+
+**ADR 11: Opt-in, coarse trip ends for route-expansion analysis.**
+To see where people travel from and where new routes, extra stops or feeder services would help, the app can
+share each commute's start and end. It does so only with "Help plan new routes" switched on (off by default).
+The phone snaps each point to a ~500 m grid and sends no names. Each phone has one row per trip end under a
+random id, updated in place, so there is no movement history. Switching it off deletes the rows. The public can
+write and delete only; `s5_demand_cells` (phones per cell, usual start time, distance to the nearest S5 stop)
+is readable only by the project owner. *Why:* demand data for planning with the least personal data that still
+answers the question; a 500 m cell is enough to compare against a bus stop's walking catchment. *Cost:* only
+people who opt in are counted, so the map shows relative demand, not totals.
