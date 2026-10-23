@@ -4,7 +4,7 @@ Never miss the Gautrain S5 bus between Sandton Station and Montecasino. Open it 
 **https://ndu3000.github.io/s5-live/**.
 
 An independent, open-source citizen project: not affiliated with or endorsed by the Gautrain Management Agency
-or Bombela. No accounts, ads or trackers. See the [privacy notice](PRIVACY.md) (POPIA).
+or its operator SSM. No accounts, ads or trackers. See the [privacy notice](PRIVACY.md) (POPIA).
 
 - **Live**: the next bus you can catch, when to leave, and where your bus really is (live GPS).
 - **Route**: a live map of the S5 with every bus on it, plus the stop-by-stop list with times.

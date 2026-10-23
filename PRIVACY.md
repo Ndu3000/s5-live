@@ -14,7 +14,7 @@ Africa's Protection of Personal Information Act, 2013 (POPIA). The short version
 ## 1. Who we are
 
 S5 Bus Tracker is a free, **independent, open-source citizen project**, built and run by a volunteer. It is
-**not** affiliated with, endorsed by or run on behalf of the Gautrain Management Agency, Bombela or any
+**not** affiliated with, endorsed by or run on behalf of the Gautrain Management Agency, its operator SSM, or any
 government body. For official timetables and service notices, see gautrain.co.za or call the Gautrain bus
 information line on 010 223 1098.
 
