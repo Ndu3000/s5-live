@@ -1,8 +1,9 @@
 -- Departure log for the S5 from Montecasino, as deployed in Supabase project gautrain-s5-live.
 -- Every 30 seconds on weekdays (05:00–22:20 SAST) pg_cron saves the GPS fixes of buses near the S5,
 -- and s5_departure_report(day) works out, for every timetabled departure from Montecasino, whether a bus
--- actually left, when, and when it reached Sandton Station. Each night the report is kept in
--- s5_departure_history and fixes older than 30 days are deleted.
+-- actually left, when, and when it reached Sandton Station; and, for that bus, when it got to Montecasino and
+-- which departure from Sandton brought it there, so a missed slot shows whether a bus was waiting or none had
+-- come yet. Each night the report is kept in s5_departure_history and fixes older than 30 days are deleted.
 -- Needs pg_cron and the backup relay public.s5_buses() from backup-relays.sql.
 
 create extension if not exists pg_cron;
@@ -31,6 +32,12 @@ create table if not exists public.s5_departure_history (
   trip_min numeric,
   note text
 );
+alter table public.s5_departure_history
+  add column if not exists monte_arrived_at timestamptz,  -- the bus's trip before: reached Montecasino
+  add column if not exists waited_min numeric,
+  add column if not exists sandton_left_at timestamptz,   -- ...after leaving Sandton Station
+  add column if not exists sandton_slot time,             -- as this timetabled departure from Sandton
+  add column if not exists sandton_late_min numeric;
 create index if not exists s5_departure_history_day on public.s5_departure_history (day);
 alter table public.s5_departure_history enable row level security;
 
@@ -79,99 +86,199 @@ begin
   return n;
 end $$;
 
--- Every bus that left Montecasino Terminal towards Sandton on a day, and when it reached Sandton Station.
-create or replace function public.s5_monte_departures(d date)
-returns table (bus_id text, departed_at timestamptz, sandton_at timestamptz)
+-- Weekday departures from Sandton Station towards Montecasino, minutes after midnight.
+create or replace function public.s5_sandton_timetable()
+returns int[] language sql immutable as $$
+  select array[368,378,388,398,408,418,428,438,448,458,468,478,488,498,508,518,528,538,548,568,588,608,628,648,668,
+    688,708,728,748,768,788,808,828,848,868,888,908,918,928,938,948,958,968,978,988,998,1008,1018,1028,1038,1048,1058,
+    1068,1078,1088,1098,1108,1118,1128,1138,1158,1178,1198,1218,1238]
+$$;
+
+create or replace function public.s5_day_min(d date, t timestamptz)
+returns numeric language sql immutable as $$
+  select extract(epoch from (t at time zone 'Africa/Johannesburg') - d::timestamp) / 60
+$$;
+
+create or replace function public.s5_hm(t timestamptz)
+returns text language sql immutable as $$ select to_char(t at time zone 'Africa/Johannesburg', 'HH24:MI') $$;
+
+-- The timetable slot a departure at minute m belongs to: the nearest free one, leaving early counting
+-- 2.5 times as far as leaving late, from 4 min early to 15 min late. Null if none.
+create or replace function public.s5_slot_match(m numeric, slots int[], taken jsonb default '{}')
+returns int language plpgsql immutable as $$
+declare i int; best int; best_cost numeric; c numeric;
+begin
+  for i in 1 .. array_length(slots, 1) loop
+    continue when taken ? i::text;
+    c := m - slots[i];
+    continue when c < -4 or c > 15;
+    c := case when c >= 0 then c else -c * 2.5 end;
+    if best is null or c < best_cost then best := i; best_cost := c; end if;
+  end loop;
+  return best;
+end $$;
+
+-- Every bus that left Montecasino Terminal towards Sandton on a day, when it reached Sandton Station,
+-- and the trip before: when it got to Montecasino and when it left Sandton for it (null if it didn't come from Sandton).
+drop function if exists public.s5_departure_report(date);
+drop function if exists public.s5_monte_departures(date);
+create function public.s5_monte_departures(d date)
+returns table (bus_id text, departed_at timestamptz, sandton_at timestamptz, monte_arrived_at timestamptz, sandton_left_at timestamptz)
 language sql stable
 security definer
 set search_path = public
 as $$
   with p as (
     select l.bus_id, l.fix_at, l.seen_at, l.lat,
-      public.s5_dist_m(l.lat, l.lon, -26.02466, 28.0114) < 150 as at_monte,
+      public.s5_dist_m(l.lat, l.lon, -26.02466, 28.0114) as dm,
       public.s5_dist_m(l.lat, l.lon, -26.10801, 28.05673) < 150 as at_sandton
     from public.s5_pos_log l
     where l.fix_at >= (d::timestamp + interval '4 hours') at time zone 'Africa/Johannesburg'
       and l.fix_at < (d::timestamp + interval '24 hours') at time zone 'Africa/Johannesburg'
   ), q as (
-    select p.*, lag(at_monte) over w as was_monte, lag(seen_at) over w as left_seen
+    select p.*, p.dm < 150 as at_monte, lag(p.dm < 150) over w as was_monte,
+      lag(p.seen_at) over w as prev_seen, lead(p.fix_at) over w as next_fix
     from p window w as (partition by p.bus_id order by p.fix_at)
   ), dep as (
     -- Last seen parked at the terminal, then the first fix outside it: it left halfway between.
-    select q.bus_id, q.left_seen + (q.fix_at - q.left_seen) / 2 as departed_at, q.fix_at as out_at
+    select q.bus_id, q.prev_seen + (q.fix_at - q.prev_seen) / 2 as departed_at, q.fix_at as out_at
     from q where q.was_monte and not q.at_monte
+      -- Count it only if it went down William Nicol before coming back to the terminal.
+      and exists (select 1 from p s where s.bus_id = q.bus_id and s.lat < -26.035
+                    and s.fix_at between q.fix_at and q.fix_at + interval '25 minutes'
+                    and not exists (select 1 from p m where m.bus_id = q.bus_id and m.dm < 150
+                                      and m.fix_at > q.fix_at and m.fix_at < s.fix_at))
+  ), stay as (
+    -- Its time at the terminal began after it was last well away (400 m) or last missing from the feed for 15 min.
+    select dep.*,
+      (select max(a.fix_at) from q a where a.bus_id = dep.bus_id and a.fix_at < dep.out_at and a.dm > 400) as away_at,
+      (select max(g.fix_at) from q g where g.bus_id = dep.bus_id and g.fix_at < dep.out_at
+         and g.fix_at - g.prev_seen > interval '15 minutes') as gap_at
+    from dep
+  ), arr as (
+    select stay.*,
+      (select case when i.prev_seen is null or i.fix_at - i.prev_seen > interval '15 minutes' then i.fix_at
+                   else i.prev_seen + (i.fix_at - i.prev_seen) / 2 end
+       from q i where i.bus_id = stay.bus_id and i.at_monte and i.fix_at < stay.out_at
+         and (stay.away_at is null or i.fix_at > stay.away_at) and (stay.gap_at is null or i.fix_at >= stay.gap_at)
+       order by i.fix_at limit 1) as monte_arrived_at
+    from stay
   )
-  select dep.bus_id, dep.departed_at,
-    (select min(s.fix_at) from p s where s.bus_id = dep.bus_id and s.at_sandton
-       and s.fix_at between dep.out_at and dep.out_at + interval '100 minutes')
-  from dep
-  -- Count it only if it went down William Nicol before coming back to the terminal.
-  where exists (select 1 from p s where s.bus_id = dep.bus_id and s.lat < -26.035
-                  and s.fix_at between dep.out_at and dep.out_at + interval '25 minutes'
-                  and not exists (select 1 from p m where m.bus_id = dep.bus_id and m.at_monte
-                                    and m.fix_at > dep.out_at and m.fix_at < s.fix_at))
+  select a.bus_id, a.departed_at,
+    (select min(s.fix_at) from p s where s.bus_id = a.bus_id and s.at_sandton
+       and s.fix_at between a.out_at and a.out_at + interval '100 minutes'),
+    a.monte_arrived_at,
+    -- Last seen at Sandton Station on the way: it left halfway to its next fix. Only when it came straight from there.
+    (select s.seen_at + (coalesce(s.next_fix, s.seen_at) - s.seen_at) / 2 from q s
+     where s.bus_id = a.bus_id and s.at_sandton and s.fix_at < a.monte_arrived_at
+       and s.fix_at > a.monte_arrived_at - interval '100 minutes' and (a.gap_at is null or s.fix_at >= a.gap_at)
+     order by s.fix_at desc limit 1)
+  from arr a
   order by 2
 $$;
 
--- For every timetabled departure from Montecasino on a day: did a bus leave, how late, and when it reached Sandton.
--- Each actual departure goes to the nearest free slot; leaving early counts 2.5 times as far as leaving late,
--- so a bus leaving at 09:27 is the 09:27, and the 09:17 shows as not run.
-create or replace function public.s5_departure_report(d date)
-returns table (scheduled time, status text, bus_id text, departed time, late_min numeric,
-               sandton time, trip_min numeric, note text)
+-- For every timetabled departure from Montecasino on a day: did a bus leave, how late, when it reached Sandton,
+-- and the bus's trip before (when it reached Montecasino, how long it waited, which Sandton departure it was).
+-- A slot that did not run says why: a bus was waiting there but left later, or no bus had arrived yet.
+create function public.s5_departure_report(d date)
+returns table (scheduled time, status text, bus_id text, departed time, late_min numeric, sandton time, trip_min numeric,
+               monte_arrived time, waited_min numeric, left_sandton time, sandton_slot time, sandton_late_min numeric, note text)
 language plpgsql stable
 security definer
 set search_path = public
 as $$
 declare
   slots int[] := public.s5_monte_timetable();
-  got jsonb := '{}';   -- slot index -> departure
-  extra jsonb := '[]';
-  dep record; i int; best int; best_cost numeric; late numeric; cost numeric; any_dep boolean := false;
-  now_min numeric := extract(epoch from (now() at time zone 'Africa/Johannesburg') - d::timestamp) / 60;
+  inslots int[] := public.s5_sandton_timetable();
   sast text := 'Africa/Johannesburg';
+  deps jsonb := '[]'; got jsonb := '{}'; lst jsonb := '[]';
+  r jsonb; x jsonb; y jsonb; dep record; i int; j int; ts timestamptz; why text;
+  now_min numeric := public.s5_day_min(d, now());
+  any_dep boolean := false;
 begin
   for dep in select * from public.s5_monte_departures(d) loop
-    any_dep := true; best := null; best_cost := null;
-    late := extract(epoch from (dep.departed_at at time zone sast) - d::timestamp) / 60;
-    for i in 1 .. array_length(slots, 1) loop
-      continue when got ? i::text;
-      cost := late - slots[i];
-      continue when cost < -4 or cost > 15;
-      cost := case when cost >= 0 then cost else -cost * 2.5 end;
-      if best is null or cost < best_cost then best := i; best_cost := cost; end if;
-    end loop;
-    if best is null then
-      extra := extra || jsonb_build_object('bus', dep.bus_id, 'dep', dep.departed_at, 'arr', dep.sandton_at);
-    else
-      got := got || jsonb_build_object(best::text, jsonb_build_object('bus', dep.bus_id, 'dep', dep.departed_at, 'arr', dep.sandton_at));
-    end if;
+    any_dep := true;
+    i := public.s5_slot_match(public.s5_day_min(d, dep.departed_at), slots, got);
+    x := jsonb_build_object('bus', dep.bus_id, 'dep', dep.departed_at, 'arr', dep.sandton_at,
+                            'marr', dep.monte_arrived_at, 'sleft', dep.sandton_left_at, 'slot', i);
+    deps := deps || jsonb_build_array(x);
+    if i is not null then got := got || jsonb_build_object(i::text, x); end if;
   end loop;
   for i in 1 .. array_length(slots, 1) loop
-    scheduled := make_time(slots[i] / 60, slots[i] % 60, 0);
-    bus_id := null; departed := null; late_min := null; sandton := null; trip_min := null; note := null;
-    if got ? i::text then
-      bus_id := got -> i::text ->> 'bus';
-      departed := ((got -> i::text ->> 'dep')::timestamptz at time zone sast)::time(0);
+    lst := lst || jsonb_build_array(jsonb_build_object('slot', i, 'x', got -> i::text));
+  end loop;
+  for x in select e from jsonb_array_elements(deps) e where e -> 'slot' = 'null' loop
+    lst := lst || jsonb_build_array(jsonb_build_object('slot', null, 'x', x));
+  end loop;
+
+  for r in select e from jsonb_array_elements(lst) e loop
+    i := (r ->> 'slot')::int; x := r -> 'x'; if x = 'null' then x := null; end if;
+    scheduled := case when i is null then null else make_time(slots[i] / 60, slots[i] % 60, 0) end;
+    ts := (d + scheduled) at time zone sast;
+    bus_id := null; departed := null; late_min := null; sandton := null; trip_min := null; monte_arrived := null;
+    waited_min := null; left_sandton := null; sandton_slot := null; sandton_late_min := null; note := null;
+    if x is not null then
+      bus_id := x ->> 'bus';
+      departed := ((x ->> 'dep')::timestamptz at time zone sast)::time(0);
       late_min := round((extract(epoch from departed - scheduled) / 60)::numeric, 1);
-      status := case when late_min < -1 then 'left early' when late_min > 3 then 'left late' else 'on time' end;
-      if got -> i::text ->> 'arr' is not null then
-        sandton := ((got -> i::text ->> 'arr')::timestamptz at time zone sast)::time(0);
-        trip_min := round((extract(epoch from (got -> i::text ->> 'arr')::timestamptz - (got -> i::text ->> 'dep')::timestamptz) / 60)::numeric, 1);
-      elsif now_min < slots[i] + 100 then note := 'on the way';
-      else note := 'not seen arriving at Sandton';
+      status := case when i is null then 'extra departure' when late_min < -1 then 'left early'
+                     when late_min > 3 then 'left late' else 'on time' end;
+      sandton := ((x ->> 'arr')::timestamptz at time zone sast)::time(0);
+      trip_min := round((extract(epoch from (x ->> 'arr')::timestamptz - (x ->> 'dep')::timestamptz) / 60)::numeric, 1);
+      monte_arrived := ((x ->> 'marr')::timestamptz at time zone sast)::time(0);
+      waited_min := round((extract(epoch from (x ->> 'dep')::timestamptz - (x ->> 'marr')::timestamptz) / 60)::numeric, 1);
+      left_sandton := ((x ->> 'sleft')::timestamptz at time zone sast)::time(0);
+      if x ->> 'sleft' is not null then
+        j := public.s5_slot_match(public.s5_day_min(d, (x ->> 'sleft')::timestamptz), inslots);
+        if j is not null then
+          sandton_slot := make_time(inslots[j] / 60, inslots[j] % 60, 0);
+          sandton_late_min := round((extract(epoch from left_sandton - sandton_slot) / 60)::numeric, 1);
+        end if;
+      end if;
+      if x ->> 'arr' is null then
+        note := case when now_min < public.s5_day_min(d, (x ->> 'dep')::timestamptz) + 100 then 'on the way'
+                     else 'not seen arriving at Sandton' end;
+      end if;
+      if late_min > 3 and (x ->> 'marr')::timestamptz > ts then
+        note := concat_ws('; ', note, 'the bus only reached Montecasino at ' || public.s5_hm((x ->> 'marr')::timestamptz));
+      end if;
+      if x ->> 'marr' is null then
+        note := concat_ws('; ', note, 'already at Montecasino when the log starts');
+      elsif x ->> 'sleft' is null then
+        note := concat_ws('; ', note, 'came to Montecasino from elsewhere, not on an S5 from Sandton');
       end if;
     elsif now_min < slots[i] + 15 then status := 'not yet';
     elsif not any_dep then status := 'no data';
-    else status := 'did not run';
+    else
+      status := 'did not run';
+      -- Was a bus waiting at the terminal at that time?
+      select e into y from jsonb_array_elements(deps) e
+        where (e ->> 'marr')::timestamptz <= ts and (e ->> 'dep')::timestamptz > ts
+        order by (e ->> 'dep')::timestamptz limit 1;
+      if y is not null then
+        note := format('bus %s was at Montecasino from %s but only left at %s', y ->> 'bus',
+                       public.s5_hm((y ->> 'marr')::timestamptz), public.s5_hm((y ->> 'dep')::timestamptz))
+          || coalesce(' as the ' || to_char(make_time(slots[(y ->> 'slot')::int] / 60, slots[(y ->> 'slot')::int] % 60, 0), 'HH24:MI'), '');
+      else
+        select e into y from jsonb_array_elements(deps) e
+          where (e ->> 'dep')::timestamptz > ts order by (e ->> 'dep')::timestamptz limit 1;
+        if y is null then note := 'no bus left Montecasino after this';
+        elsif y ->> 'marr' is null then
+          note := format('the next bus, %s, left at %s; when it reached Montecasino is not in the log',
+                         y ->> 'bus', public.s5_hm((y ->> 'dep')::timestamptz));
+        elsif y ->> 'sleft' is null then
+          note := format('no bus at the terminal: the next bus, %s, arrived at %s from elsewhere (not an S5 from Sandton) and left at %s',
+                         y ->> 'bus', public.s5_hm((y ->> 'marr')::timestamptz), public.s5_hm((y ->> 'dep')::timestamptz));
+        else
+          j := public.s5_slot_match(public.s5_day_min(d, (y ->> 'sleft')::timestamptz), inslots);
+          why := case when j is null then '' else format(' (the %s from Sandton, %s min late)',
+                   to_char(make_time(inslots[j] / 60, inslots[j] % 60, 0), 'HH24:MI'),
+                   round(public.s5_day_min(d, (y ->> 'sleft')::timestamptz) - inslots[j])) end;
+          note := format('no bus at the terminal: the next bus, %s, only arrived at %s; it left Sandton at %s%s',
+                         y ->> 'bus', public.s5_hm((y ->> 'marr')::timestamptz), public.s5_hm((y ->> 'sleft')::timestamptz), why);
+        end if;
+      end if;
     end if;
-    return next;
-  end loop;
-  for dep in select * from jsonb_to_recordset(extra) as x(bus text, dep timestamptz, arr timestamptz) loop
-    scheduled := null; status := 'extra departure'; bus_id := dep.bus;
-    departed := (dep.dep at time zone sast)::time(0); late_min := null;
-    sandton := (dep.arr at time zone sast)::time(0);
-    trip_min := round((extract(epoch from dep.arr - dep.dep) / 60)::numeric, 1); note := null;
     return next;
   end loop;
 end $$;
@@ -185,12 +292,11 @@ as $$
 declare d date := (now() at time zone 'Africa/Johannesburg')::date;
 begin
   delete from public.s5_departure_history where day = d;
-  insert into public.s5_departure_history
-    select d, r.scheduled, r.status, r.bus_id,
-      case when r.departed is null then null else (d + r.departed) at time zone 'Africa/Johannesburg' end,
-      r.late_min,
-      case when r.sandton is null then null else (d + r.sandton) at time zone 'Africa/Johannesburg' end,
-      r.trip_min, r.note
+  insert into public.s5_departure_history (day, scheduled, status, bus_id, departed_at, late_min, sandton_at, trip_min,
+      monte_arrived_at, waited_min, sandton_left_at, sandton_slot, sandton_late_min, note)
+    select d, r.scheduled, r.status, r.bus_id, (d + r.departed) at time zone 'Africa/Johannesburg', r.late_min,
+      (d + r.sandton) at time zone 'Africa/Johannesburg', r.trip_min, (d + r.monte_arrived) at time zone 'Africa/Johannesburg',
+      r.waited_min, (d + r.left_sandton) at time zone 'Africa/Johannesburg', r.sandton_slot, r.sandton_late_min, r.note
     from public.s5_departure_report(d) r
     where r.status <> 'no data';
   delete from public.s5_pos_log where fix_at < now() - interval '30 days';
