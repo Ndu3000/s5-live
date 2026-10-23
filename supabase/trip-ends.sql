@@ -2,7 +2,9 @@
 -- With "Help plan new routes" switched on in the app (off by default), a phone shares where its commute starts
 -- (first mile) and ends (last mile). The phone snaps each point to a ~500 m grid before sending it and never sends
 -- place names. Each phone has one row per trip end under a random id, updated in place, so there is no movement
--- history. Switching sharing off deletes the phone's rows. Only the project owner can read the data or the analysis.
+-- history. Switching sharing off deletes the phone's rows; rows not refreshed for 12 months are deleted. Sharing
+-- needs consent on the app's consent screen (recorded as consent_version). Only the project owner can read the data
+-- or the analysis. See PRIVACY.md.
 
 create table if not exists public.s5_trip_ends (
   device uuid not null,            -- random id made on the phone, not linked to a person
@@ -11,6 +13,7 @@ create table if not exists public.s5_trip_ends (
   lon numeric(7, 3) not null,
   usual_time time,                 -- when the morning journey usually starts, to the nearest 15 min
   updated_at timestamptz not null default now(),
+  consent_version text,            -- date of the privacy notice the person agreed to
   primary key (device, role)
 );
 alter table public.s5_trip_ends enable row level security;  -- no policies: only the functions below touch it
@@ -19,7 +22,9 @@ alter table public.s5_trip_ends enable row level security;  -- no policies: only
 create or replace function public.s5_snap(v float8)
 returns numeric language sql immutable as $$ select round((round(v / 0.005) * 0.005)::numeric, 3) $$;
 
-create or replace function public.s5_share_trip_end(p_device uuid, p_role text, p_lat float8, p_lon float8, p_usual text default null)
+-- Shares one trip end. Only with consent to the current privacy notice: p_consent is the notice's date (PRIVACY.md),
+-- and the app sends it only after the person agrees on its consent screen. Change both together.
+create or replace function public.s5_share_trip_end(p_device uuid, p_role text, p_lat float8, p_lon float8, p_usual text, p_consent text)
 returns void
 language plpgsql
 security definer
@@ -27,6 +32,7 @@ set search_path = public
 as $$
 declare u time;
 begin
+  if p_consent is distinct from '2026-10-23' then raise exception 'consent to the current privacy notice is required'; end if;
   if p_role not in ('first_mile', 'last_mile') then raise exception 'role must be first_mile or last_mile'; end if;
   if p_lat not between -26.9 and -25.1 or p_lon not between 27.3 and 29.1 then raise exception 'point is outside Gauteng'; end if;
   -- A cheap brake on abuse: the app writes a couple of rows when settings change, never hundreds a minute.
@@ -36,11 +42,25 @@ begin
   if p_usual ~ '^\d\d:\d\d$' then
     u := make_time(split_part(p_usual, ':', 1)::int, (split_part(p_usual, ':', 2)::int / 15) * 15, 0);
   end if;
-  insert into public.s5_trip_ends as t (device, role, lat, lon, usual_time, updated_at)
-    values (p_device, p_role, public.s5_snap(p_lat), public.s5_snap(p_lon), u, now())
+  insert into public.s5_trip_ends as t (device, role, lat, lon, usual_time, updated_at, consent_version)
+    values (p_device, p_role, public.s5_snap(p_lat), public.s5_snap(p_lon), u, now(), p_consent)
   on conflict (device, role) do update
-    set lat = excluded.lat, lon = excluded.lon, usual_time = excluded.usual_time, updated_at = now();
+    set lat = excluded.lat, lon = excluded.lon, usual_time = excluded.usual_time, updated_at = now(), consent_version = excluded.consent_version;
 end $$;
+
+-- The first version, without consent, now refuses, so an older copy of the app can't share without agreeing.
+create or replace function public.s5_share_trip_end(p_device uuid, p_role text, p_lat float8, p_lon float8, p_usual text default null)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  raise exception 'consent to the current privacy notice is required: please reload the app';
+end $$;
+
+-- Retention: entries not refreshed for 12 months are deleted (the app refreshes them monthly while it is used).
+create or replace function public.s5_trip_ends_retention()
+returns void language sql security definer set search_path = public as $$
+  delete from public.s5_trip_ends where updated_at < now() - interval '12 months'
+$$;
+select cron.schedule('s5-trip-ends-retention', '17 2 * * 0', 'select public.s5_trip_ends_retention()');  -- Sundays 04:17 SAST
 
 -- Delete one trip end (p_role) or all of a phone's trip ends (p_role null).
 create or replace function public.s5_forget_trip_ends(p_device uuid, p_role text default null)
@@ -77,10 +97,11 @@ from public.s5_trip_ends e
 group by e.role, e.lat, e.lon;
 
 revoke all on public.s5_trip_ends, public.s5_demand_cells from anon, authenticated;
-revoke all on function public.s5_share_trip_end(uuid, text, float8, float8, text), public.s5_forget_trip_ends(uuid, text)
+revoke all on function public.s5_share_trip_end(uuid, text, float8, float8, text, text), public.s5_forget_trip_ends(uuid, text)
   from public;
-grant execute on function public.s5_share_trip_end(uuid, text, float8, float8, text), public.s5_forget_trip_ends(uuid, text)
+grant execute on function public.s5_share_trip_end(uuid, text, float8, float8, text, text), public.s5_forget_trip_ends(uuid, text)
   to anon, authenticated;
+revoke all on function public.s5_trip_ends_retention() from public, anon, authenticated;
 
 -- Where and when the S5 should grow, from the shared trip ends (and the departure log). Owner-only.
 -- Zones are ~2 km squares; zones with fewer than p_min_phones phones are left out, so no single person shows.

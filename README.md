@@ -3,6 +3,9 @@
 Never miss the Gautrain S5 bus between Sandton Station and Montecasino. Open it at
 **https://ndu3000.github.io/s5-live/**.
 
+An independent, open-source citizen project: not affiliated with or endorsed by the Gautrain Management Agency
+or Bombela. No accounts, ads or trackers. See the [privacy notice](PRIVACY.md) (POPIA).
+
 - **Live**: the next bus you can catch, when to leave, and where your bus really is (live GPS).
 - **Route**: a live map of the S5 with every bus on it, plus the stop-by-stop list with times.
 - **Timetable** and **Plan**: the weekday timetable from any stop, and "arrive by" / "leave after" planning.
@@ -36,7 +39,8 @@ How live GPS works:
   marks departures that often don't run or leave late (`public.s5_reliability`).
 - Saved places stay on your phone. Their ride times to and from the S5 come from TomTom (typical weekday
   traffic) through the `s5-traffic` relay once per place, and are kept on the phone for 30 days.
-- Help plan new routes (off by default): shares where your commute starts and ends, snapped to a ~500 m grid,
+- Help plan new routes (off by default, and only after agreeing on a consent screen; see [PRIVACY.md](PRIVACY.md)):
+  shares where your commute starts and ends, snapped to a ~500 m grid,
   without names, under a random id, so demand can be mapped against the S5 (`supabase/trip-ends.sql`).
   Turning it off deletes what was shared. For the project owner, `select * from s5_expansion_report();` ranks
   where the S5 should grow: ~2 km zones by phones, distance to the nearest S5 stop and the kind of expansion
@@ -184,7 +188,11 @@ no key, and only when the user taps Search.
 
 **ADR 11: Opt-in, coarse trip ends for route-expansion analysis.**
 To see where people travel from and where new routes, extra stops or feeder services would help, the app can
-share each commute's start and end. It does so only with "Help plan new routes" switched on (off by default).
+share each commute's start and end. It does so only with "Help plan new routes" switched on (off by default), and
+only after the person agrees on a consent screen that says what is and isn't shared, who sees it, why, and for how
+long, with "I'm 18 or older" ticked. "Not now" is as easy as "Agree". The server refuses entries that don't carry
+the current privacy notice's date (`consent_version`), so if the notice changes, people are asked again.
+Unrefreshed entries are deleted after 12 months (the app refreshes active ones monthly).
 The phone snaps each point to a ~500 m grid and sends no names. Each phone has one row per trip end under a
 random id, updated in place, so there is no movement history. Switching it off deletes the rows. The public can
 write and delete only. The project owner alone can read `s5_demand_cells` (phones per cell, usual start time,

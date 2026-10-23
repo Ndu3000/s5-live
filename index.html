@@ -110,6 +110,16 @@ select option{background:#121a24;color:#eef2f7}
 .btn{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface-2);font-weight:700;font-size:14px}
 .btn svg{width:18px;height:18px}
 .btn.primary{background:var(--gold);border-color:var(--gold);color:var(--gold-ink)}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.consent h3{margin:14px 0 4px;font-size:13.5px}
+.consent ul{margin:0;padding-inline-start:18px;font-size:13px;color:var(--muted)}
+.consent li{margin:4px 0}
+.consent li b{color:var(--text)}
+.consent .lead{margin:4px 0 0;font-size:14px}
+.consent .fine{margin:12px 0 0;font-size:12px;color:var(--muted)}
+.check{display:flex;gap:10px;align-items:center;margin-top:16px;font-size:14px;font-weight:650}
+.share-status{margin-top:8px;padding:9px 11px;border-radius:10px;border:1px solid rgba(61,220,151,.35);background:rgba(61,220,151,.07);font-size:12.5px;color:var(--muted)}
+.share-status b{color:var(--text)}
 .btn.armed{background:rgba(244,182,63,.12);border-color:rgba(244,182,63,.55);color:var(--gold-2)}
 .livebox{margin-top:12px;border-radius:14px;padding:10px 12px;display:flex;gap:10px;align-items:center;border:1px solid rgba(124,183,255,.35);background:rgba(124,183,255,.08);font-size:13px;color:var(--muted)}
 .livebox svg{width:18px;height:18px;flex:none;color:var(--blue)}
@@ -420,8 +430,9 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       <div class="search"><input type="search" id="placeQuery" class="txt" placeholder="Search an address, or paste lat, lon" autocomplete="off" aria-label="Search for a place"><button class="chip" data-action="place-search">Search</button></div>
       <div id="placeResults" class="places" aria-live="polite"></div>
       <div class="chips"><button class="chip" data-action="place-here">Save where I am now</button></div>
-      <div class="hint">Places are saved on this device. Address search uses OpenStreetMap (Nominatim).</div></div>
-    <div class="set-row switch"><div><label for="shareOn">Help plan new routes</label><div class="hint">Shares where your commute starts and ends, rounded to about 500 m and without names, so we can see where people travel from and where new routes or stops would help most. Turning it off deletes what was shared.</div></div><input type="checkbox" id="shareOn"></div>
+      <div class="hint">Places are saved only on this phone. “Save where I am now” asks for your location once. Search sends what you type to OpenStreetMap. To work out ride times, a new place is sent once to TomTom through this app's server, which doesn't keep it.</div></div>
+    <div class="set-row"><div class="switch"><div><label for="shareOn">Help plan new routes</label><div class="hint">Optional. Share the rough area (about 500 m) where your commute starts and ends, never names or addresses, to show where new routes, stops or more buses are needed. You'll see exactly what is shared before you agree.</div></div><input type="checkbox" id="shareOn"></div>
+      <div id="shareStatus"></div></div>
     <div class="set-row switch"><div><label for="liveOn">Live bus GPS</label><div class="hint" id="liveNote">Shows real bus positions and warns you if your bus is early or late.</div></div><input type="checkbox" id="liveOn" checked></div>
     <div class="set-row switch"><div><label for="smartDir">Smart direction</label><div class="hint">Opens on “To Sandton” before noon and “To Montecasino” after noon.</div></div><input type="checkbox" id="smartDir" checked></div>
     <button class="btn" data-action="test-alarm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span>Test the alert</span></button>
@@ -432,6 +443,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       <p>Regular Gautrain buses don't run on weekends or public holidays. Traffic can delay buses; if yours is late, call the Gautrain bus information line on 010 223 1098.</p>
       <p>Alerts ring while this app is open on your screen.</p>
       <p id="persistNote"></p>
+      <p><b>Independent project.</b> S5 Bus Tracker is a free, open-source citizen project. It is not affiliated with or endorsed by the Gautrain Management Agency or Bombela. For official information, see gautrain.co.za or call 010 223 1098.</p>
+      <p><button class="linklike" data-action="privacy">Privacy and your data (POPIA)</button> · <a class="linklike" href="https://github.com/Ndu3000/s5-live" target="_blank" rel="noopener">Source code</a></p>
     </div>
   </div>
 </div>
@@ -449,6 +462,64 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     <h2 id="alarmTitle">Time to leave!</h2>
     <p id="alarmBody"></p>
     <button class="btn primary" data-action="dismiss-alarm">I'm on my way</button>
+  </div>
+</div>
+
+<div class="overlay" id="consentSheet" aria-hidden="true">
+  <div class="sheet consent" role="dialog" aria-modal="true" aria-labelledby="cnTitle" aria-describedby="cnLead">
+    <div class="sheet-head"><h2 id="cnTitle">Help plan better routes</h2><button class="icon-btn" data-action="consent-no" aria-label="Close without sharing"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+    <p class="lead" id="cnLead">Share roughly where your commute starts and ends, so we can show where new routes, extra stops or more frequent buses would help the most people.</p>
+    <h3>What's shared</h3>
+    <ul>
+      <li>The <b>area</b> your commute starts and ends in, rounded on your phone to about 500 m: a neighbourhood, not your address.</li>
+      <li>The time you usually set off, to the nearest 15 minutes.</li>
+      <li>A <b>random code</b> made on this phone, so your entry can be updated or deleted. It isn't linked to you.</li>
+    </ul>
+    <h3>Never shared</h3>
+    <ul>
+      <li>Place names, exact addresses, or your live location and trips.</li>
+      <li>Your name, number or contacts. The app has no accounts.</li>
+    </ul>
+    <h3>Who sees it, and why</h3>
+    <ul>
+      <li>Only the volunteer who runs this open-source project, to plan where service could grow.</li>
+      <li>Results are shared, for example with transport authorities, only as <b>counts per area, never for fewer than 3 people</b>.</li>
+      <li>Never sold, never used for advertising.</li>
+    </ul>
+    <h3>Your choice</h3>
+    <ul>
+      <li>It's optional. The app works exactly the same without it.</li>
+      <li>Stop any time in Settings: your entry is <b>deleted straight away</b>. Entries unused for 12 months are deleted automatically.</li>
+    </ul>
+    <label class="check"><input type="checkbox" id="consentAge"> I'm 18 or older</label>
+    <div class="actions"><button class="btn" data-action="consent-no">Not now</button><button class="btn primary" data-action="consent-yes" id="consentYes" disabled>Agree and share</button></div>
+    <p class="fine">Stored on Supabase servers in Frankfurt, Germany. Your rights under POPIA, and how to reach us: <button class="linklike" data-action="privacy">privacy notice</button>.</p>
+  </div>
+</div>
+
+<div class="overlay" id="privacySheet" aria-hidden="true">
+  <div class="sheet consent" role="dialog" aria-modal="true" aria-labelledby="pvTitle">
+    <div class="sheet-head"><h2 id="pvTitle">Privacy and your data</h2><button class="icon-btn" data-action="close" aria-label="Close the privacy notice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+    <p class="lead">No accounts, no ads, no trackers. What you save stays on your phone unless you choose to help plan new routes.</p>
+    <h3>Who runs this</h3>
+    <ul><li>An independent, open-source citizen project run by a volunteer (GitHub: Ndu3000), the responsible party under POPIA. Not affiliated with Gautrain.</li></ul>
+    <h3>Stays on your phone</h3>
+    <ul><li>Settings, alerts, saved places and their ride times. Delete places in Settings, or clear this site's data.</li></ul>
+    <h3>Leaves your phone</h3>
+    <ul>
+      <li><b>Live buses and traffic:</b> requests to the app's server, with no personal information. Like any website, the hosting services see your IP address in short-lived logs.</li>
+      <li><b>Ride times for a new place:</b> its coordinates, once, to TomTom through the app's server. Not stored.</li>
+      <li><b>Address search:</b> what you type, to OpenStreetMap.</li>
+      <li><b>Open Uber:</b> the pickup and drop-off, in Uber, under Uber's privacy policy.</li>
+      <li><b>Help plan new routes</b>, only if you agree: the ~500 m areas where your commute starts and ends, when you usually set off, and a random code. Kept until you stop, or 12 months after you last used the app.</li>
+    </ul>
+    <h3>Your rights</h3>
+    <ul>
+      <li>Ask what we hold, have it corrected or deleted, object, or withdraw consent. <b>Stop and delete</b> in Settings removes your shared entry at once.</li>
+      <li>Shared entries aren't linked to you, so we can only find yours through the code on this phone.</li>
+      <li>Questions or requests: <a class="linklike" href="https://github.com/Ndu3000/s5-live/issues" target="_blank" rel="noopener">GitHub issues</a> (public, so leave out personal details). Complaints: the <a class="linklike" href="https://inforegulator.org.za" target="_blank" rel="noopener">Information Regulator</a>.</li>
+    </ul>
+    <p class="fine">Processed by Supabase (Germany), GitHub Pages (USA), TomTom (Netherlands) and OpenStreetMap (UK/EU). <a class="linklike" href="https://github.com/Ndu3000/s5-live/blob/main/PRIVACY.md" target="_blank" rel="noopener">Full privacy notice</a> · updated 23 Oct 2026.</p>
   </div>
 </div>
 
@@ -587,6 +658,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     commuteFrom: typeof saved.commuteFrom === 'string' ? saved.commuteFrom : '',
     commuteTo: typeof saved.commuteTo === 'string' ? saved.commuteTo : '',
     share: saved.share === true,
+    consent: saved.consent && typeof saved.consent.v === 'string' && Number.isFinite(saved.consent.at) ? saved.consent : null,
+    sharedAt: Number(saved.sharedAt) || 0,
     remind: null,
     delay: 0,
     tab: 'live',
@@ -606,7 +679,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     if (state.dirId === 'toMontecasino') { state.planMode = 'depart'; state.planTime = '17:00'; }
   })();
   function persist() {
-    store.set('s5.settings', { dirId: state.dirId, board: state.board, alight: state.alight, walk: state.walk, buffer: state.buffer, lead: state.lead, sound: state.sound, vibrate: state.vibrate, smartDir: state.smartDir, live: state.live, commute: state.commute, commuteUsual: state.commuteUsual, commuteFrom: state.commuteFrom, commuteTo: state.commuteTo, share: state.share });
+    store.set('s5.settings', { dirId: state.dirId, board: state.board, alight: state.alight, walk: state.walk, buffer: state.buffer, lead: state.lead, sound: state.sound, vibrate: state.vibrate, smartDir: state.smartDir, live: state.live, commute: state.commute, commuteUsual: state.commuteUsual, commuteFrom: state.commuteFrom, commuteTo: state.commuteTo, share: state.share, consent: state.consent, sharedAt: state.sharedAt });
   }
 
   /* ---------- Route geometry ----------
@@ -1244,6 +1317,10 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   }
 
   // "Help plan new routes": the commute's start and end, snapped to a ~500 m grid, under a random id for this device.
+  // Only after consent on the consent screen to the current privacy notice (PRIVACY.md, dated CONSENT_VERSION);
+  // the server refuses anything else. If the notice changes, the app asks again before sharing.
+  const CONSENT_VERSION = '2026-10-23';
+  const sharing = () => state.share && !!state.consent && state.consent.v === CONSENT_VERSION;
   const gridSnap = v => +(Math.round(v / 0.005) * 0.005).toFixed(3);
   function deviceId() {
     let id = store.get('s5.device', null);
@@ -1257,14 +1334,17 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   }
   const rpcPost = (fn, body) => fetch(RPC + fn, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + FEED_KEY, apikey: FEED_KEY }, body: JSON.stringify(body) });
   async function shareTripEnds() {
-    if (!state.share) return;
+    if (!sharing()) return;
     const id = deviceId();
+    let ok = true;
     for (const [role, p] of [['first_mile', placeById(state.commuteFrom)], ['last_mile', placeById(state.commuteTo)]]) {
       try {
-        if (p) await rpcPost('s5_share_trip_end', { p_device: id, p_role: role, p_lat: gridSnap(p.lat), p_lon: gridSnap(p.lon), p_usual: role === 'first_mile' ? state.commuteUsual : null });
-        else await rpcPost('s5_forget_trip_ends', { p_device: id, p_role: role });
-      } catch (e) { /* try again next time settings change */ }
+        const res = p ? await rpcPost('s5_share_trip_end', { p_device: id, p_role: role, p_lat: gridSnap(p.lat), p_lon: gridSnap(p.lon), p_usual: role === 'first_mile' ? state.commuteUsual : null, p_consent: state.consent.v })
+          : await rpcPost('s5_forget_trip_ends', { p_device: id, p_role: role });
+        if (!res.ok) ok = false;
+      } catch (e) { ok = false; /* try again next time settings change */ }
     }
+    if (ok) { state.sharedAt = Date.now(); persist(); }
   }
   async function forgetTripEnds() {
     try { await rpcPost('s5_forget_trip_ends', { p_device: deviceId(), p_role: null }); toast('Shared trip ends deleted'); }
@@ -1828,7 +1908,13 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       const use = [p.id === state.commuteFrom ? 'start' : '', p.id === state.commuteTo ? 'end' : ''].filter(Boolean).join(' & ');
       return '<div class="place"><b>' + esc(p.name) + '</b>' + (use ? '<small>commute ' + use + '</small>' : '') + '<button class="chip" data-action="place-del" data-id="' + esc(p.id) + '" aria-label="Delete ' + esc(p.name) + '">Delete</button></div>';
     }).join('') : '<div class="hint">No saved places yet.</div>';
-    $('shareOn').checked = state.share;
+    $('shareOn').checked = sharing();
+    const ends = [['starts', placeById(state.commuteFrom)], ['ends', placeById(state.commuteTo)]].filter(e => e[1])
+      .map(([w, p]) => 'your commute ' + w + ' in the ~500 m area around <b>' + gridSnap(p.lat).toFixed(3) + ', ' + gridSnap(p.lon).toFixed(3) + '</b> (' + esc(p.name) + ')');
+    const since = state.consent ? new Date(state.consent.at + SAST) : null;
+    $('shareStatus').innerHTML = !sharing() ? '' : '<div class="share-status">Sharing since <b>' + since.getUTCDate() + ' ' + MON[since.getUTCMonth()] + ' ' + since.getUTCFullYear() + '</b>: ' +
+      (ends.length ? ends.join('; ') + (placeById(state.commuteFrom) ? '; you usually set off around <b>' + esc(state.commuteUsual) + '</b>' : '') : 'nothing yet, until you choose where your commute starts or ends') +
+      '. Names stay on your phone. <button class="linklike" data-action="share-stop">Stop and delete</button></div>';
     $('plan-arrive').setAttribute('aria-pressed', String(state.planMode === 'arrive'));
     $('plan-depart').setAttribute('aria-pressed', String(state.planMode === 'depart'));
     if ($('planTime').value !== state.planTime) $('planTime').value = state.planTime;
@@ -1863,7 +1949,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     const o = $(id);
     if (!o.classList.contains('open')) lastFocus = document.activeElement;
     o.classList.add('open'); o.setAttribute('aria-hidden', 'false');
-    const f = o.querySelector('[data-action="close"],[data-action="dismiss-alarm"]');
+    const f = o.querySelector('[data-action="close"],[data-action="consent-no"],[data-action="dismiss-alarm"]');
     if (f && f.focus) { try { f.focus(); } catch (e) { /* ignore */ } }
   }
   function closeOverlay(id) {
@@ -1943,6 +2029,15 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
         break;
       }
       case 'place-del': deletePlace(d.id); break;
+      case 'privacy': openOverlay('privacySheet'); break;
+      case 'consent-yes':
+        if (!$('consentAge').checked) break;
+        state.share = true; state.consent = { v: CONSENT_VERSION, at: Date.now() }; persist();
+        closeOverlay('consentSheet'); shareTripEnds(); renderStatic();
+        toast('Thank you. You can stop and delete it any time in Settings.');
+        break;
+      case 'consent-no': closeOverlay('consentSheet'); renderStatic(); toast('No problem. Nothing was shared.'); break;
+      case 'share-stop': state.share = false; persist(); forgetTripEnds(); renderStatic(); break;
       case 'map-fit': fitTrip(computeModel(Date.now())); break;
       case 'map-mybus': {
         const m = computeModel(Date.now()), b = m.mode === 'today' && m.hero.live ? m.hero.live.bus : null;
@@ -1974,9 +2069,11 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       case 'commuteUsual': if (/^\d\d:\d\d$/.test(t.value)) { state.commuteUsual = t.value; persist(); shareTripEnds(); tick(true); } break;
       case 'commuteFrom': case 'commuteTo': state[t.id] = placeById(t.value) ? t.value : ''; persist(); shareTripEnds(); refresh(); break;
       case 'shareOn':
-        state.share = !!t.checked; persist();
-        if (state.share) { shareTripEnds(); toast('Thanks — your commute\'s start and end are shared, rounded to ~500 m'); } else forgetTripEnds();
+        if (t.checked) { // nothing is shared until the person agrees on the consent screen
+          t.checked = false; $('consentAge').checked = false; $('consentYes').disabled = true; openOverlay('consentSheet');
+        } else { state.share = false; persist(); forgetTripEnds(); renderStatic(); }
         break;
+      case 'consentAge': $('consentYes').disabled = !t.checked; break;
       case 'planTime': state.planTime = t.value || state.planTime; tick(true); break;
       default: break;
     }
@@ -1993,13 +2090,16 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   document.addEventListener('keydown', ev => {
     if (ev.key === 'Enter' && ev.target && ev.target.id === 'placeQuery') { ev.preventDefault(); searchPlaces(ev.target.value); return; }
     if (ev.key !== 'Escape') return;
+    const top = ['privacySheet', 'consentSheet'].find(id => $(id).classList.contains('open'));
     if ($('alarm').classList.contains('open')) dismissAlarm();
+    else if (top) closeOverlay(top);
     else { closeOverlay('settingsSheet'); closeOverlay('alertsSheet'); }
   });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { keepAwake(); pollLive(); tick(true); } });
 
   window.S5Tracker = { placeById, rideMin, morningPlans, eveningPlans, lastConnection, TRAINS, probes, liveTraffic, pollTraffic, DIRS, state, computeModel, buildTrips, busesOnRoad, dayInfo, holidays, fmtDur, hhmm, tick, live, OSM_D, LOOP_M, pollLive, runMin, planHtml };
   loadPlaces();
+  if (sharing() && Date.now() - state.sharedAt > 30 * DAY) shareTripEnds();
   // A personal setup link: #commute=1&place=Home@-26.0,28.0&place=Gym@…&from=Home&to=Gym&usual=06:35
   // (home=lat,lon still works and saves a place called Home). It is removed from the address bar once read.
   (function setupFromLink() {
