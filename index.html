@@ -1814,6 +1814,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   function liveHtml(m) { return bannerHtml(m) + noBusHtml(m) + missedHtml(m) + heroHtml(m) + laterHtml(m); }
   function commuteHtml(m) {
     if (!state.commute) return '';
+    if (ride.mode === 'riding' && ride.on) return ''; // the ride card has the rest of the journey
     const now = m.now, today = m.today, t = (now - m.todayStart) / MIN;
     let ds = m.todayStart, when = '', mode = '', plans = [];
     if (today.service) {
