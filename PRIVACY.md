@@ -1,6 +1,6 @@
 # Privacy notice
 
-**S5 Bus Tracker** · last updated **23 October 2026** · applies to https://ndu3000.github.io/s5-live/
+**S5 Bus Tracker** · last updated **26 October 2026** · applies to https://ndu3000.github.io/s5-live/
 
 This notice explains, in plain language, what the app does with information about you, as required by South
 Africa's Protection of Personal Information Act, 2013 (POPIA). The short version:
@@ -45,6 +45,7 @@ Stored only in your browser's storage on your phone, and never sent to us:
 | You search for an address | The text you type | OpenStreetMap Foundation's Nominatim search | No |
 | You tap "Save where I am now" | Nothing. Your phone asks your permission, then gives the app your location once, and it is saved only on your phone. | Nobody | No |
 | You tap "I'm on a bus" (or it's your commute time and you've allowed location) | Nothing. While it runs, your location is compared with the buses' GPS **on your phone** to recognise your bus; it stops when you get off, tap Stop, or after 25 minutes without a match. | Nobody | No |
+| **Only if you choose "Share my confirmed rides"**, when a confirmed ride ends | See section 4A | The app's server | Yes, see section 4A |
 | You tap "Open Uber" | The pickup and drop-off points, inside the Uber app | Uber | No. Uber's privacy policy applies. |
 | **Only if you agree to help plan new routes** | See section 4 | The app's server | Yes, see section 4 |
 
@@ -78,6 +79,28 @@ automatically.
 
 **It's your choice.** Sharing is voluntary and off unless you turn it on. The app works exactly the same either
 way. Please don't turn it on if you are under 18.
+
+## 4A. Sharing your confirmed rides (optional, only if you choose it)
+
+**Purpose.** To check and improve the app's arrival times. A ride you confirmed shows which bus really ran which
+departure, and when it reached the stops along the way.
+
+**What is shared**, when a ride you confirmed with "I'm on a bus" ends: the bus number, its direction and timetabled
+departure, how the ride was recognised (GPS match or picked from the list), the stop and time where the ride was
+confirmed, the stop and time where it ended, and why it ended (last stop, got off, or you tapped "I got off").
+
+**Never shared:** your location or GPS track, your saved places, your name, number, or anything that links the
+ride to you or your phone. There is no random code for rides.
+
+**Who can see it, and how long.** Only the maintainer, to improve arrival times. Results may be published only as
+summaries of many rides. Kept for 12 months.
+
+**Your choice.** Off unless you choose it, either on the ride card after your first confirmed ride or in Settings →
+Share my confirmed rides, and you can turn it off at any time. Because shared rides aren't linked to you, rides that
+have already been shared can't be traced back to you or picked out to delete.
+
+The app also learns real travel times from **Gautrain's own bus GPS** (when each bus passed each stop). That is
+data about the buses, not about anyone.
 
 ## 5. Your rights
 
@@ -115,5 +138,7 @@ where we can, the people affected, as POPIA requires.
 
 ## 8. Changes to this notice
 
-If this notice changes in a way that affects what is shared, its date changes and the app asks for your consent
-again before sharing anything more. The history of this file is public on GitHub.
+Each consent is recorded with the version of the section you agreed to: route planning (section 4) is version
+2026-10-23, and sharing confirmed rides (section 4A) is version rides-2026-10-26. If a section changes in a way that
+affects what is shared, its version changes and the app asks for your consent again before sharing anything more.
+The history of this file is public on GitHub.

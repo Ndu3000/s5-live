@@ -15,7 +15,9 @@ or its operator SSM. No accounts, ads or trackers. See the [privacy notice](PRIV
   places: add one by searching an address, pasting coordinates, or "Save where I am now".
 - **I'm on a bus**: the app recognises which S5 bus you're on by matching your phone's location with the buses'
   GPS (on the phone; your location is never sent), asks you to confirm with one tap, then shows the next stop,
-  your arrival and your train or ride connection. If location is off, pick your bus from a list.
+  your arrival and your train or ride connection. If location is off, pick your bus from a list. Optionally
+  (asked once, or in Settings) the ride's summary is shared to improve arrival times: the bus, its departure,
+  and the stops and times where the ride was confirmed and ended. Never the location, not linked to anyone.
 
 How live GPS works:
 
@@ -50,6 +52,10 @@ How live GPS works:
   (walkable, extra stop or detour, feeder or new route, with its direction), and departure hours by demand against
   the S5's frequency and reliability (add service, run more often, fix missing runs). Zones and hours with fewer
   than 3 phones are left out.
+- Learned travel times (`supabase/eta-learning.sql`): each night the departure log's bus GPS gives the time every
+  trip reached every stop (interpolated between reports at speed). `s5_segment_profile` turns that into the median
+  minutes for each stretch by half hour (3+ trips on 2+ days), which the app uses in place of TomTom's typical car
+  traffic, with live traffic applied as a change on top.
 - Without a TomTom key, Gautrain's own buses are the traffic sensors: each S5 bus's progress over the last 3-6
   minutes, against what the timetable expects in typical traffic, sets a live factor for the stretches it drove
   (kept for 15 minutes).
@@ -79,6 +85,9 @@ flowchart TB
       log[("Departure log<br/>s5_pos_log, s5_log_beat")]
       hist[("s5_departure_history")]
       rel["s5_reliability<br/>public read-only summary"]
+      pass[("s5_stop_passages<br/>when each trip reached each stop")]
+      prof["s5_segment_profile<br/>learned minutes per stretch"]
+      rides[("s5_rides<br/>opt-in ride summaries")]
       ends[("s5_trip_ends<br/>opt-in, ~500 m grid, no names")]
       demand["s5_demand_cells, s5_expansion_report<br/>owner-only analysis"]
     end
@@ -115,6 +124,10 @@ flowchart TB
   cron -->|"nightly 22:30"| hist
   log -->|"departures worked out"| hist
   hist --> rel
+  cron -->|"nightly 22:45"| pass --> prof
+  app -->|"travel times, every 6 h"| prof
+  app -.->|"opt-in: confirmed ride summary"| rides
+  rides -.-> owner
   awake -->|"every 2 days"| rpc
   ends --> demand --> owner
   hist -.->|"reliability by hour"| demand
@@ -215,3 +228,13 @@ make a candidate; the person confirms or says No. The ride ends at the last stop
 phone's "in a vehicle" detection, and the walk-beside or car-behind cases fall out within a few reports, so the
 tap settles the rest. *Privacy:* all on the phone; nothing is sent. *Cost:* GPS uses battery and only works with
 the page open, so it stops after 25 minutes without a match. Tested against a real ride (bus 32993, 26 Oct).
+
+**ADR 13: Arrival estimates learn from the buses' own recorded trips.**
+TomTom's typical traffic describes cars. The S5 also queues out of the Montecasino terminal, stops and turns. On
+Monday 26 October the first kilometre took buses 8–12 minutes at 07:00–07:30 against the timetable's 3, and the
+whole trip took 18 minutes at 05:10 but 51 at 07:17. So the departure log's GPS is turned into the time each trip
+reached each stop, and the median per stretch and half hour (3+ trips on 2+ days) replaces the typical-traffic
+factor; live traffic still adjusts it. *Why:* it measures exactly what riders experience, it is Gautrain's bus data,
+not anyone's, and it improves every day the log runs. *Safeguards:* two days minimum, so one bad day can't set it;
+TomTom remains the fallback where there are too few trips. Rides confirmed by riders (opt-in, anonymous) are kept
+separately, to check which bus ran which departure.
