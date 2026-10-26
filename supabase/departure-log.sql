@@ -169,8 +169,9 @@ as $$
     select q.bus_id, q.prev_seen + (q.fix_at - q.prev_seen) / 2 as departed_at, q.fix_at as out_at
     from q where q.was_monte and not q.at_monte
       and q.fix_at - q.prev_seen <= interval '5 minutes'  -- across a feed gap its time is unknown
-      -- Count it only if it went down William Nicol before coming back to the terminal.
-      and exists (select 1 from p s where s.bus_id = q.bus_id and s.lat < -26.035
+      -- Count it only if it got 400 m out, heading south (towards Sandton), before coming back to the terminal.
+      -- Not further: in the morning queue out of Montecasino the first kilometre can take over 10 minutes.
+      and exists (select 1 from p s where s.bus_id = q.bus_id and s.dm > 400 and s.lat < -26.0265
                     and s.fix_at between q.fix_at and q.fix_at + interval '25 minutes'
                     and not exists (select 1 from p m where m.bus_id = q.bus_id and m.dm < 150
                                       and m.fix_at > q.fix_at and m.fix_at < s.fix_at))
