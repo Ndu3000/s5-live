@@ -1184,6 +1184,10 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       });
       if (best) { ride.cand = best.id; ride.mode = 'confirm'; ride.auto = false; tick(true); }
       else if (ride.auto && now - ride.started > RIDE_AUTO_MS) rideStop(); // no bus around the commute time: stop, to save battery
+    } else if (ride.mode === 'riding' && ride.on && !ride.on.busId) {
+      const b = live.trips[ride.on.dirId] && live.trips[ride.on.dirId][ride.on.trip];
+      if (b) { ride.on.busId = b.id; ride.lastSeen = now; store.set('s5.ride', ride.on); tick(true); }
+      else if (now - ride.on.at > 20 * MIN) rideEnd('Live GPS never picked up your bus, so the ride has ended');
     } else if (ride.mode === 'riding' && ride.on) {
       const b = live.buses.get(ride.on.busId), dir = DIRS[ride.on.dirId];
       if (b && b.dirId === ride.on.dirId && b.trip != null) ride.on.trip = b.trip;
@@ -1211,10 +1215,24 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   }
   const busLabel = b => (b.trip != null ? 'the ' + hhmm(DIRS[b.dirId].starts[b.trip]) + ' ' : 'an S5 ') + toPhrase(DIRS[b.dirId]);
   const busNear = b => (b.at === 'monte' ? 'waiting at ' : 'near ') + stopTitle(DIRS[b.dirId].stops[Math.min(lastIdx(DIRS[b.dirId]), Math.max(0, Math.round(b.pos)))]);
+  // Departures from Sandton in the last 10 minutes that live GPS hasn't matched to a bus yet: they may still be in
+  // the stretch around the station where other routes share the streets.
+  function sandtonUnseen(now) {
+    const dir = DIRS.toMontecasino, ds = dayStartMs(now), t = (now - ds) / MIN, seen = live.trips.toMontecasino || {};
+    return dir.starts.map((s0, i) => ({ s0, i })).filter(x => !seen[x.i] && t >= x.s0 + state.delay - 2 && t <= x.s0 + state.delay + 10);
+  }
   function ridePickHtml() {
     const list = Array.from(live.buses.values()).filter(b => b.dirId && !b.old).sort((p, q) => (p.dirId > q.dirId) - (p.dirId < q.dirId) || p.off - q.off);
-    if (!list.length) return '<p>Live GPS can\'t see any S5 buses right now.</p>';
-    return '<div class="pick">' + list.map(b => '<button class="place" data-action="ride-pick" data-bus="' + esc(b.id) + '"><b>' + esc(cap(busLabel(b))) + '</b><small>' + esc(busNear(b)) + '</small></button>').join('') + '</div>';
+    const waiting = sandtonUnseen(Date.now());
+    if (!list.length && !waiting.length) return '<p>Live GPS can\'t see any S5 buses right now.</p>';
+    return '<div class="pick">' + waiting.map(x => '<button class="place" data-action="ride-pick-trip" data-dir="toMontecasino" data-i="' + x.i + '"><b>The ' + hhmm(x.s0) + ' to Montecasino</b><small>leaving Sandton Station</small></button>').join('') +
+      list.map(b => '<button class="place" data-action="ride-pick" data-bus="' + esc(b.id) + '"><b>' + esc(cap(busLabel(b))) + '</b><small>' + esc(busNear(b)) + '</small></button>').join('') + '</div>';
+  }
+  // A ride picked by its departure before live GPS can see the bus: the bus is attached once GPS matches it to the trip.
+  function rideConfirmTrip(dirId, i) {
+    ride.on = { busId: null, dirId, trip: i, at: Date.now(), how: 'picked', board: { stop: 0, at: Date.now() } };
+    ride.mode = 'riding'; ride.cand = null; ride.away = 0;
+    store.set('s5.ride', ride.on); tick(true);
   }
   function rideHtml(m) {
     if (ride.mode === 'idle') {
@@ -1236,6 +1254,11 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     // Riding
     const r = ride.on, dir = DIRS[r.dirId], b = live.buses.get(r.busId), last = lastIdx(dir), now = m.now, nowMin = (now - m.todayStart) / MIN;
     const title = '<div class="row1"><h3>On ' + esc(b ? busLabel(b) : (r.trip != null ? 'the ' + hhmm(dir.starts[r.trip]) + ' ' : 'your ') + toPhrase(dir)) + (b ? ' <em class="gps">LIVE</em>' : '') + '</h3><button class="chip" data-action="ride-off">I got off</button></div>';
+    if (!b && !r.busId) {
+      const go = Math.max(nowMin, dir.starts[r.trip] + state.delay), arr = m.todayStart + (go + runMin(dir, 0, last, go)) * MIN;
+      return '<section class="card ride on">' + title + '<p>Live GPS picks out S5 buses about 700 m from Sandton Station, because other routes share the streets there. Your bus will show here once it does.</p>' +
+        '<ul class="facts"><li><span>' + esc(stopTitle(dir.stops[last])) + ' (estimate)</span><b>~' + hhmmMs(arr) + '</b></li></ul></section>';
+    }
     if (!b) return '<section class="card ride on">' + title + '<p>Bus ' + esc(r.busId) + ' isn\'t on live GPS right now. Waiting for it to report again.</p></section>';
     const at = k => {
       const lv = b.trip != null && live.trips[r.dirId] && live.trips[r.dirId][b.trip] === b ? liveFor(r.dirId, b.trip, k, now) : null;
@@ -1864,9 +1887,15 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
         if (b.trip != null) seen.add(b.trip);
       });
     }
+    // Within ~700 m of Sandton Station other routes share the streets, so live GPS can't pick out an S5 there. An S5
+    // out of Sandton that GPS hasn't seen yet is shown at the station, not where the timetable says it should be.
+    // After ~12 minutes unseen, the "no bus seen" warning takes over and the timetable estimate is shown again.
+    const nowMin = (m.now - m.todayStart) / MIN, blindOut = m.liveOn && dir.id === 'toMontecasino';
     m.onRoad.forEach(x => {
       if (seen.has(x.i)) return;
-      out.push({ pos: x.pos, i: x.i, live: false, est: m.liveOn, you: x.i === heroI, label: hhmm(x.startMin), near: dir.stops[x.k] });
+      const held = blindOut && nowMin - x.startMin <= 12;
+      const pos = held ? Math.min(x.pos, 0) : x.pos;
+      out.push({ pos, i: x.i, live: false, est: m.liveOn, unseen: held, you: x.i === heroI, label: hhmm(x.startMin), near: dir.stops[held ? 0 : x.k] });
     });
     return out;
   }
@@ -1922,7 +1951,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     }
     let markers = buses.map(x => {
       const cls = 'bus' + (x.you ? ' you' : '') + (x.live ? ' live' : x.est ? ' est' : '');
-      const what = (x.you ? 'Your bus' : 'S5 bus') + (x.i != null ? ' that left at ' + x.label : '') + (x.wait ? ', waiting at ' : ', near ') + stopTitle(x.near) + (x.live ? ' (live GPS)' : ' (estimated from the timetable)');
+      const what = x.unseen ? (x.you ? 'Your bus' : 'S5 bus') + ' that leaves at ' + x.label + ', not seen by live GPS yet (it picks out S5 buses about 700 m from Sandton Station)' : (x.you ? 'Your bus' : 'S5 bus') + (x.i != null ? ' that left at ' + x.label : '') + (x.wait ? ', waiting at ' : ', near ') + stopTitle(x.near) + (x.live ? ' (live GPS)' : ' (estimated from the timetable)');
       // The arrow points the way it's heading: down the list, towards the next stop.
       return '<div class="' + cls + '" style="top:' + y(x.pos) + 'px" role="img" aria-label="' + esc(what) + '">' + (x.live ? '<i class="lv"></i>' : ICON.bus) + x.label + (x.wait ? '' : '<i class="dn"></i>') + '</div>';
     }).join('');
@@ -1932,7 +1961,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     const done = mine ? '<div class="rail-done" style="top:' + y(0) + 'px;height:' + Math.max(0, y(mine.pos) - y(0)) + 'px"></div>' : '';
     return '<div class="track-cap"><span>Stop</span><span>' + (isToday ? 'Your ' + hhmm(h.depMin) + ' bus' : 'First bus') + '</span></div>' +
       '<div class="track" style="height:' + (n * ROW) + 'px"><div class="rail" style="top:' + y(0) + 'px;height:' + (last * ROW) + 'px"></div>' + done + rows + markers + '</div>' +
-      '<p class="foot">' + (m.liveOn ? 'Buses with a green dot are live GPS positions. Dashed ones are estimated from the timetable, because live GPS can\'t see them.' : 'Positions are estimated from the timetable' + (state.delay ? ' (shifted +' + state.delay + ' min)' : '') + '.') + ' Stop times are for your bus as scheduled; the small time under one is when it should really get there' + (lvBus ? ' (live GPS' + (liveTrafficSource(m.now) ? ' and live traffic)' : ')') : liveTrafficSource(m.now) ? ' in live traffic (' + liveTrafficSource(m.now) + ')' : ' in typical traffic') + '.' + (learnedAny(dir.id) ? ' Typical times come from S5 trips the app has recorded, and from TomTom where there aren\'t enough yet.' : ' Typical traffic comes from TomTom.') + ' Where\'s my bus? Call ' + INFO_LINE + '.</p>';
+      '<p class="foot">' + (m.liveOn ? 'Buses with a green dot are live GPS positions. Dashed ones are estimated from the timetable, because live GPS can\'t see them.' +
+        (dir.id === 'toMontecasino' ? ' Other routes share the streets around Sandton Station, so live GPS picks out an S5 only about 700 m from the station; until then a bus that has just left shows at the station.' : '') : 'Positions are estimated from the timetable' + (state.delay ? ' (shifted +' + state.delay + ' min)' : '') + '.') + ' Stop times are for your bus as scheduled; the small time under one is when it should really get there' + (lvBus ? ' (live GPS' + (liveTrafficSource(m.now) ? ' and live traffic)' : ')') : liveTrafficSource(m.now) ? ' in live traffic (' + liveTrafficSource(m.now) + ')' : ' in typical traffic') + '.' + (learnedAny(dir.id) ? ' Typical times come from S5 trips the app has recorded, and from TomTom where there aren\'t enough yet.' : ' Typical traffic comes from TomTom.') + ' Where\'s my bus? Call ' + INFO_LINE + '.</p>';
   }
 
   /* ---------- Live map ---------- */
@@ -2268,6 +2298,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       case 'ride-yes': if (ride.cand) rideConfirm(ride.cand, 'gps'); break;
       case 'ride-no': ride.no.add(ride.cand); ride.cand = null; ride.mode = 'searching'; toast('OK, still looking. You can also pick your bus from the list.'); tick(true); break;
       case 'ride-pick': rideConfirm(d.bus, 'picked'); break;
+      case 'ride-pick-trip': rideConfirmTrip(d.dir, Number(d.i)); break;
       case 'ride-off': rideEnd('Ride ended', 'tapped'); break;
       case 'rides-yes': state.rideShare = { v: RIDE_CONSENT, at: Date.now() }; persist(); renderStatic(); tick(true); toast('Thank you. Change it any time in Settings.'); break;
       case 'rides-no': state.rideShare = { no: true, at: Date.now() }; persist(); renderStatic(); tick(true); break;
