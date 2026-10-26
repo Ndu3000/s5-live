@@ -13,6 +13,9 @@ or its operator SSM. No accounts, ads or trackers. See the [privacy notice](PRIV
 - **My commute** (turn it on in Settings): door to door with a ride (Uber/Bolt) to the S5, the S5 and the Gautrain,
   and back. You choose where the morning starts (first mile) and where the evening ends (last mile) from your saved
   places: add one by searching an address, pasting coordinates, or "Save where I am now".
+- **I'm on a bus**: the app recognises which S5 bus you're on by matching your phone's location with the buses'
+  GPS (on the phone; your location is never sent), asks you to confirm with one tap, then shows the next stop,
+  your arrival and your train or ride connection. If location is off, pick your bus from a list.
 
 How live GPS works:
 
@@ -99,6 +102,7 @@ flowchart TB
   app -->|"map tiles"| osm
   app -.->|"commute card deep link"| uber
   app -.->|"place search, when asked"| nominatim
+  gps(["Phone GPS<br/>'I'm on a bus', matched on the phone"]) -.-> app
   app -->|"ride times for a saved place, once"| trafn
   app -.->|"opt-in: commute start and end"| ends
 
@@ -201,3 +205,13 @@ stop, detour, feeder or new route would serve the most people, and which hours n
 reliable service (using the departure log). Groups smaller than 3 phones are left out. *Why:* demand data for planning with the least personal data that still
 answers the question; a 500 m cell is enough to compare against a bus stop's walking catchment. *Cost:* only
 people who opt in are counted, so the map shows relative demand, not totals.
+
+**ADR 12: Recognising your bus on the phone, confirmed with one tap.**
+While "I'm on a bus" runs (after a tap, or around the commute's own bus if location is already allowed), the
+phone's GPS is compared with each S5 bus's GPS reports. Each report is compared with where the phone was *at the
+report's time*, because the feed can be a minute behind. Three reports in a row within ~60 m (plus GPS error)
+make a candidate; the person confirms or says No. The ride ends at the last stop, after two reports more than
+300 m from the bus, or on "I got off". *Why:* the most accurate signal a web app has. Browsers don't offer the
+phone's "in a vehicle" detection, and the walk-beside or car-behind cases fall out within a few reports, so the
+tap settles the rest. *Privacy:* all on the phone; nothing is sent. *Cost:* GPS uses battery and only works with
+the page open, so it stops after 25 minutes without a match. Tested against a real ride (bus 32993, 26 Oct).

@@ -160,6 +160,15 @@ select option{background:#121a24;color:#eef2f7}
 .card{margin-top:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
 .card h3{margin:0;font-size:15px}
 .card p{margin:6px 0 0;font-size:13px;color:var(--muted)}
+.ride .row1{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.ride .row1 h3{font-size:14px}
+.ride.on{border-color:rgba(61,220,151,.45);background:linear-gradient(rgba(61,220,151,.06),rgba(61,220,151,.02)),var(--surface)}
+.ride.ask{border-color:rgba(244,182,63,.6)}
+.ride .facts{margin:8px 0 0;padding:0;list-style:none;font-size:13.5px}
+.ride .facts li{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px solid var(--line)}
+.ride .facts li:first-child{border-top:0}
+.ride .facts b{font-variant-numeric:tabular-nums}
+.ride .pick{display:flex;flex-direction:column;gap:6px;margin-top:10px}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .chip{min-height:34px;padding:0 13px;border-radius:999px;border:1px solid var(--line);background:var(--surface-2);font-size:13px;font-weight:700}
 .chip[aria-pressed="true"]{background:var(--gold);border-color:var(--gold);color:var(--gold-ink)}
@@ -370,6 +379,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
 
   <main>
     <section class="tab" id="tab-live" role="tabpanel" aria-labelledby="nav-live">
+      <div id="ride"></div>
       <div id="commute"></div>
       <div id="live"></div>
       <div id="helpCard"></div>
@@ -510,6 +520,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       <li><b>Live buses and traffic:</b> requests to the app's server, with no personal information. Like any website, the hosting services see your IP address in short-lived logs.</li>
       <li><b>Ride times for a new place:</b> its coordinates, once, to TomTom through the app's server. Not stored.</li>
       <li><b>Address search:</b> what you type, to OpenStreetMap.</li>
+      <li><b>I'm on a bus:</b> nothing. Your location is compared with the buses' GPS on your phone and never sent.</li>
       <li><b>Open Uber:</b> the pickup and drop-off, in Uber, under Uber's privacy policy.</li>
       <li><b>Help plan new routes</b>, only if you agree: the ~500 m areas where your commute starts and ends, when you usually set off, and a random code. Kept until you stop, or 12 months after you last used the app.</li>
     </ul>
@@ -963,6 +974,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     });
     Array.from(live.buses.keys()).forEach(id => { if (!seen.has(id)) live.buses.delete(id); });
     matchTrips(now);
+    rideObserve(now);
   }
   // Is this bus driving along the S5, and where? The feed doesn't say which route a bus is on.
   function classify(b) {
@@ -1041,6 +1053,166 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     if (!gone && bus.at === 'monte') { const go = Math.max(nowMin, dir.starts[i]); etaMs = ds + (go + runMin(dir, 0, k, go)) * MIN; } // waits for its departure time
     else if (!gone) etaMs = now + runMin(dir, Math.min(bus.pos, k), k, nowMin) * MIN; // timetable pace from here, adjusted for typical traffic
     return { bus, gone, etaMs, late: etaMs ? (etaMs - (ds + (dir.starts[i] + ok) * MIN)) / MIN : bus.late, here: !gone && Math.abs(bus.pos - k) < 0.25 && bus.at !== 'monte', stopsAway: Math.max(0, Math.ceil(k - bus.pos - 0.25)) };
+  }
+
+  /* ---------- Am I on a bus? ----------
+     The phone's own location (only while this is running, and only on the phone) is compared with every S5 bus's
+     GPS reports. Each report is compared with where the phone was at that report's time, not now, because the feed
+     can be a minute behind. Three reports in a row within ~60 m (plus GPS error) make a candidate, which the person
+     confirms with one tap. Without location, they can pick their bus from a list. */
+  const RIDE_NEAR_M = 60, RIDE_RUN = 3, RIDE_OFF_M = 300, RIDE_KEEP_MS = 6 * MIN, RIDE_AUTO_MS = 25 * MIN;
+  const ride = { mode: 'idle', watch: null, track: [], fixes: new Map(), cand: null, no: new Set(), started: 0, auto: false, err: '', away: 0,
+    on: (() => { const r = store.get('s5.ride', null); return r && r.busId && Date.now() - r.at < 2 * 3600000 ? r : null; })() };
+  if (ride.on) ride.mode = 'riding';
+  // Where the phone was at time t: between the two samples around it, or a sample within 20 s.
+  function phoneAt(t) {
+    const tr = ride.track;
+    let a = null, b = null;
+    for (const s of tr) { if (s.t <= t && (!a || s.t > a.t)) a = s; if (s.t >= t && (!b || s.t < b.t)) b = s; }
+    if (a && b && b.t - a.t <= 45000) {
+      const f = b.t === a.t ? 0 : (t - a.t) / (b.t - a.t);
+      return { ll: [a.ll[0] + f * (b.ll[0] - a.ll[0]), a.ll[1] + f * (b.ll[1] - a.ll[1])], acc: Math.max(a.acc, b.acc) };
+    }
+    const c = a && t - a.t <= 20000 ? a : b && b.t - t <= 20000 ? b : null;
+    return c ? { ll: c.ll, acc: c.acc } : null;
+  }
+  // How many of this bus's latest reports in a row the phone was beside (newest first), and the mean distance.
+  function rideRun(fixes) {
+    let run = 0, sum = 0;
+    for (let k = fixes.length - 1; k >= 0; k--) {
+      const ph = phoneAt(fixes[k].t);
+      if (!ph) break;
+      const d = distM(ph.ll, fixes[k].ll);
+      if (d > RIDE_NEAR_M + Math.min(ph.acc || 0, 50)) break;
+      run++; sum += d;
+    }
+    return { run, mean: run ? sum / run : Infinity };
+  }
+  function rideStart(auto) {
+    ride.no.clear(); ride.cand = null; ride.err = ''; ride.track = []; ride.started = Date.now(); ride.auto = !!auto;
+    if (!navigator.geolocation) { ride.mode = 'pick'; ride.err = 'This browser can\'t share your location, so pick your bus below.'; tick(true); return; }
+    ride.mode = 'searching';
+    if (ride.watch == null) {
+      ride.watch = navigator.geolocation.watchPosition(pos => {
+        ride.track.push({ t: pos.timestamp || Date.now(), ll: [pos.coords.latitude, pos.coords.longitude], acc: pos.coords.accuracy || 30 });
+        const cut = Date.now() - RIDE_KEEP_MS; ride.track = ride.track.filter(x => x.t >= cut);
+        rideCheck(Date.now());
+      }, err => {
+        if (ride.mode === 'riding') return; // keep the confirmed ride; it ends at the last stop or on "I got off"
+        rideStopWatch();
+        if (ride.auto) { ride.mode = 'idle'; tick(true); return; }
+        ride.mode = 'pick';
+        ride.err = err && err.code === 1 ? 'Location is blocked for this site, so pick your bus below. (To allow it on iPhone: Settings → Privacy & Security → Location Services → Safari Websites.)'
+          : 'Couldn\'t get your location, so pick your bus below.';
+        tick(true);
+      }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
+    }
+    tick(true);
+  }
+  function rideStopWatch() { if (ride.watch != null) { try { navigator.geolocation.clearWatch(ride.watch); } catch (e) { /* ignore */ } } ride.watch = null; }
+  function rideStop() { rideStopWatch(); ride.mode = 'idle'; ride.cand = null; ride.track = []; tick(true); }
+  function rideConfirm(id) {
+    const b = live.buses.get(id);
+    if (!b || !b.dirId) { toast('That bus has dropped out of live GPS; try again in a moment'); return; }
+    ride.on = { busId: id, dirId: b.dirId, trip: b.trip, at: Date.now() };
+    ride.mode = 'riding'; ride.cand = null; ride.away = 0;
+    store.set('s5.ride', ride.on); tick(true);
+  }
+  function rideEnd(msg) {
+    ride.on = null; store.set('s5.ride', null); rideStopWatch(); ride.mode = 'idle'; ride.track = [];
+    if (msg) toast(msg);
+    tick(true);
+  }
+  // Each feed update: keep each S5 bus's recent reports, then look for a match or check the ride in progress.
+  function rideObserve(now) {
+    const cut = now - RIDE_KEEP_MS;
+    live.buses.forEach(b => {
+      if (!b.dirId || b.old) return;
+      const arr = ride.fixes.get(b.id) || [];
+      if (!arr.length || arr[arr.length - 1].t !== b.fix) arr.push({ t: b.fix, ll: b.ll });
+      ride.fixes.set(b.id, arr.filter(x => x.t >= cut));
+    });
+    ride.fixes.forEach((arr, id) => { if (!live.buses.has(id) || !arr.length) ride.fixes.delete(id); });
+    rideCheck(now);
+  }
+  function rideCheck(now) {
+    if (ride.mode === 'searching') {
+      let best = null;
+      ride.fixes.forEach((arr, id) => {
+        if (ride.no.has(id) || !live.buses.has(id)) return;
+        const r = rideRun(arr);
+        if (r.run >= RIDE_RUN && (!best || r.mean < best.mean)) best = { id, mean: r.mean };
+      });
+      if (best) { ride.cand = best.id; ride.mode = 'confirm'; ride.auto = false; tick(true); }
+      else if (ride.auto && now - ride.started > RIDE_AUTO_MS) rideStop(); // no bus around the commute time: stop, to save battery
+    } else if (ride.mode === 'riding' && ride.on) {
+      const b = live.buses.get(ride.on.busId), dir = DIRS[ride.on.dirId];
+      if (b && b.dirId === ride.on.dirId && b.trip != null) ride.on.trip = b.trip;
+      if (b && b.dirId === ride.on.dirId && b.pos >= lastIdx(dir) - 0.25) { rideEnd('You\'ve reached ' + stopTitle(dir.stops[lastIdx(dir)])); return; }
+      if (!b && now - ride.on.at > 5 * MIN && now - (ride.lastSeen || ride.on.at) > 5 * MIN) { rideEnd('Your bus has dropped out of live GPS, so the ride has ended'); return; }
+      if (b) ride.lastSeen = now;
+      // Got off: the phone has been well away from the bus for its last two reports.
+      const arr = ride.fixes.get(ride.on.busId) || [];
+      if (ride.watch != null && arr.length >= 2) {
+        const far = arr.slice(-2).every(f => { const ph = phoneAt(f.t); return ph && distM(ph.ll, f.ll) > RIDE_OFF_M; });
+        if (far) rideEnd('Looks like you got off. Have a good day!');
+      }
+    }
+  }
+  // Around the commute's own bus, if location is already allowed, start looking without a tap.
+  let rideAutoAt = 0;
+  function rideAuto(m) {
+    if (!state.commute || ride.mode !== 'idle' || ride.on || !m.today.service || !m.liveOn || m.now - rideAutoAt < 30000) return;
+    rideAutoAt = m.now;
+    if (!navigator.permissions || !navigator.permissions.query) return;
+    const ds = m.todayStart, near = p => p && m.now >= p.busDep - 3 * MIN && m.now <= p.busDep + 20 * MIN;
+    const am = morningPlans(ds, m.now - 40 * MIN)[0], pm = eveningPlans(ds, m.now - 60 * MIN).find(p => near(p));
+    if (!near(am) && !pm) return;
+    navigator.permissions.query({ name: 'geolocation' }).then(st => { if (st.state === 'granted' && ride.mode === 'idle' && !ride.on) rideStart(true); }).catch(() => { /* not supported */ });
+  }
+  const busLabel = b => (b.trip != null ? 'the ' + hhmm(DIRS[b.dirId].starts[b.trip]) + ' ' : 'an S5 ') + toPhrase(DIRS[b.dirId]);
+  const busNear = b => (b.at === 'monte' ? 'waiting at ' : 'near ') + stopTitle(DIRS[b.dirId].stops[Math.min(lastIdx(DIRS[b.dirId]), Math.max(0, Math.round(b.pos)))]);
+  function ridePickHtml() {
+    const list = Array.from(live.buses.values()).filter(b => b.dirId && !b.old).sort((p, q) => (p.dirId > q.dirId) - (p.dirId < q.dirId) || p.off - q.off);
+    if (!list.length) return '<p>Live GPS can\'t see any S5 buses right now.</p>';
+    return '<div class="pick">' + list.map(b => '<button class="place" data-action="ride-pick" data-bus="' + esc(b.id) + '"><b>' + esc(cap(busLabel(b))) + '</b><small>' + esc(busNear(b)) + '</small></button>').join('') + '</div>';
+  }
+  function rideHtml(m) {
+    if (ride.mode === 'idle') {
+      if (m.mode !== 'today' || !m.liveOn) return '';
+      return '<section class="card ride"><div class="row1"><h3>On an S5 bus now?</h3><button class="chip" data-action="ride-start">I\'m on a bus</button></div></section>';
+    }
+    if (ride.mode === 'searching' || ride.mode === 'pick') {
+      const head = ride.mode === 'pick' ? '<p>' + esc(ride.err) + '</p>'
+        : '<p>' + (ride.auto ? 'It\'s around your commute time, so the app is checking whether you\'re on your bus. ' : '') + 'Matching your location with the buses\' GPS. Keep this screen open; it takes about a minute.</p>';
+      return '<section class="card ride"><div class="row1"><h3>' + (ride.mode === 'pick' ? 'Which bus are you on?' : 'Looking for your bus…') + '</h3><button class="chip" data-action="ride-stop">Stop</button></div>' + head +
+        (ride.mode === 'pick' ? ridePickHtml() : '<details><summary class="linklike" style="margin-top:8px">Or pick your bus yourself</summary>' + ridePickHtml() + '</details>') + '</section>';
+    }
+    if (ride.mode === 'confirm') {
+      const b = live.buses.get(ride.cand);
+      if (!b) { ride.mode = 'searching'; ride.cand = null; return rideHtml(m); }
+      return '<section class="card ride ask" role="alert"><h3>Looks like you\'re on ' + esc(busLabel(b)) + '</h3><p>Bus ' + esc(b.id) + ', ' + esc(busNear(b)) + '. Is that right?</p>' +
+        '<div class="actions"><button class="btn" data-action="ride-no">No</button><button class="btn primary" data-action="ride-yes">Yes, that\'s my bus</button></div></section>';
+    }
+    // Riding
+    const r = ride.on, dir = DIRS[r.dirId], b = live.buses.get(r.busId), last = lastIdx(dir), now = m.now, nowMin = (now - m.todayStart) / MIN;
+    const title = '<div class="row1"><h3>On ' + esc(b ? busLabel(b) : (r.trip != null ? 'the ' + hhmm(dir.starts[r.trip]) + ' ' : 'your ') + toPhrase(dir)) + (b ? ' <em class="gps">LIVE</em>' : '') + '</h3><button class="chip" data-action="ride-off">I got off</button></div>';
+    if (!b) return '<section class="card ride on">' + title + '<p>Bus ' + esc(r.busId) + ' isn\'t on live GPS right now. Waiting for it to report again.</p></section>';
+    const at = k => {
+      const lv = b.trip != null && live.trips[r.dirId] && live.trips[r.dirId][b.trip] === b ? liveFor(r.dirId, b.trip, k, now) : null;
+      return lv && lv.etaMs ? lv.etaMs : now + runMin(dir, Math.min(b.pos, k), k, nowMin) * MIN;
+    };
+    const next = Math.min(last, b.at === 'monte' ? 1 : Math.ceil(b.pos + 0.25)), alight = state.alight[r.dirId] > b.pos + 0.25 ? state.alight[r.dirId] : last;
+    const facts = [['Next stop: ' + esc(stopTitle(dir.stops[next])), '~' + hhmmMs(at(next))]];
+    if (alight !== next) facts.push([esc(stopTitle(dir.stops[alight])), '~' + hhmmMs(at(alight))]);
+    if (state.commute && r.dirId === 'toSandton' && alight === last) {
+      const tr = trainAfter(TRAINS.north, at(last) + SANDTON_TRANSFER * MIN, m.todayStart);
+      if (tr) facts.push(['Then the Gautrain to Midrand', trainHhmm(tr.dep) + ' → ' + hhmmMs(tr.arr)]);
+    }
+    const end = placeById(state.commuteTo);
+    if (state.commute && r.dirId === 'toMontecasino' && alight === last && end) facts.push(['Book your ride to ' + esc(end.name), '~' + hhmmMs(at(last) + (MIN_WALK - DRIVER_ETA) * MIN)]);
+    return '<section class="card ride on" aria-live="polite">' + title + '<p>Bus ' + esc(b.id) + ', ' + esc(busNear(b)) + (b.late >= 2 ? ' · ' + Math.round(b.late) + ' min behind the timetable' : '') + '.</p>' +
+      '<ul class="facts">' + facts.map(f => '<li><span>' + f[0] + '</span><b>' + f[1] + '</b></li>').join('') + '</ul></section>';
   }
 
   /* ---------- Timetable logic ---------- */
@@ -1950,6 +2122,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     processAlerts(now);
     const m = computeModel(now);
     processReminder(now);
+    rideAuto(m);
+    setHtml('ride', rideHtml(m));
     setHtml('commute', commuteHtml(m));
     setHtml('live', liveHtml(m));
     setHtml('helpCard', helpHtml(m));
@@ -2046,6 +2220,12 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       }
       case 'place-del': deletePlace(d.id); break;
       case 'privacy': openOverlay('privacySheet'); break;
+      case 'ride-start': rideStart(false); break;
+      case 'ride-stop': rideStop(); break;
+      case 'ride-yes': if (ride.cand) rideConfirm(ride.cand); break;
+      case 'ride-no': ride.no.add(ride.cand); ride.cand = null; ride.mode = 'searching'; toast('OK, still looking. You can also pick your bus from the list.'); tick(true); break;
+      case 'ride-pick': rideConfirm(d.bus); break;
+      case 'ride-off': rideEnd('Ride ended'); break;
       case 'consent-yes':
         if (!$('consentAge').checked) break;
         state.share = true; state.consent = { v: CONSENT_VERSION, at: Date.now() }; persist();
@@ -2113,7 +2293,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { keepAwake(); pollLive(); tick(true); } });
 
-  window.S5Tracker = { placeById, rideMin, morningPlans, eveningPlans, lastConnection, TRAINS, probes, liveTraffic, pollTraffic, DIRS, state, computeModel, buildTrips, busesOnRoad, dayInfo, holidays, fmtDur, hhmm, tick, live, OSM_D, LOOP_M, pollLive, runMin, planHtml };
+  window.S5Tracker = { ride, placeById, rideMin, morningPlans, eveningPlans, lastConnection, TRAINS, probes, liveTraffic, pollTraffic, DIRS, state, computeModel, buildTrips, busesOnRoad, dayInfo, holidays, fmtDur, hhmm, tick, live, OSM_D, LOOP_M, pollLive, runMin, planHtml };
   loadPlaces();
   if (sharing() && Date.now() - state.sharedAt > 30 * DAY) shareTripEnds();
   // A personal setup link: #commute=1&place=Home@-26.0,28.0&place=Gym@…&from=Home&to=Gym&usual=06:35

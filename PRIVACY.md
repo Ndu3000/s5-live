@@ -44,6 +44,7 @@ Stored only in your browser's storage on your phone, and never sent to us:
 | You add a saved place | The place's coordinates, **once**, to work out driving times to and from the S5 | The app's server, which asks TomTom | No. The coordinates travel in the body of the request, so they don't appear in server logs, and nothing is stored. TomTom handles the request under its own privacy policy. |
 | You search for an address | The text you type | OpenStreetMap Foundation's Nominatim search | No |
 | You tap "Save where I am now" | Nothing. Your phone asks your permission, then gives the app your location once, and it is saved only on your phone. | Nobody | No |
+| You tap "I'm on a bus" (or it's your commute time and you've allowed location) | Nothing. While it runs, your location is compared with the buses' GPS **on your phone** to recognise your bus; it stops when you get off, tap Stop, or after 25 minutes without a match. | Nobody | No |
 | You tap "Open Uber" | The pickup and drop-off points, inside the Uber app | Uber | No. Uber's privacy policy applies. |
 | **Only if you agree to help plan new routes** | See section 4 | The app's server | Yes, see section 4 |
 
