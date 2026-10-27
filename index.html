@@ -1545,7 +1545,9 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   const RIDE_SAMPLES = { to: [360, 390, 420, 450, 480], from: [990, 1020, 1050, 1080, 1140] };
   // Every drop-off is followed by at least a 5-minute walk: ride → bus stop, bus → platform, train → exit, ride pickup point.
   const MIN_WALK = 5;
-  const RIDE_EXTRA = 2, DRIVER_ETA = 6, SANDTON_TRANSFER = Math.max(6, MIN_WALK), PLATFORM_WALK = MIN_WALK;
+  // Bus stop to platform at Sandton, timed by a rider: 4 min by the lifts (27 Oct, off 08:32, platform 08:36), and the
+  // 08:27 train caught after getting off at 08:22 (26 Oct). 5 min leaves a minute for a queue at the lifts.
+  const RIDE_EXTRA = 2, DRIVER_ETA = 6, SANDTON_TRANSFER = MIN_WALK, PLATFORM_WALK = MIN_WALK;
   const inSA = (lat, lon) => lat < -21 && lat > -35.5 && lon > 15 && lon < 33.5;
   const MONTE_STOP = { lat: -26.02466, lon: 28.0114, name: 'Montecasino (Gautrain bus stop, Palazzo Circle)' };
   // Rough Johannesburg sunset by month, for after-dark advice.
