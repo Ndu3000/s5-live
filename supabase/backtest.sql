@@ -88,7 +88,7 @@ alter table public.s5_backtest add column if not exists live float8, add column 
 
 -- Replay the trips of every day from p_since (all days if null).
 create or replace function public.s5_backtest_run() returns int
-language sql security definer set search_path = public as $$ select public.s5_backtest_run_since(null) $$;
+language plpgsql security definer set search_path = public as $$ begin return public.s5_backtest_run_since(null); end $$;
 
 create or replace function public.s5_backtest_run_since(p_since date) returns int
 language plpgsql security definer set search_path = public as $$
@@ -179,7 +179,7 @@ end $$;
 -- From day p_since (all days if null); "live" only where a live TomTom snapshot was logged.
 create or replace function public.s5_backtest_summary()
 returns table (horizon text, method text, n bigint, mae numeric, median_abs numeric, p90_abs numeric, bias numeric, within_2min numeric)
-language sql stable security definer set search_path = public as $$ select * from public.s5_backtest_summary_since(null) $$;
+language plpgsql stable security definer set search_path = public as $$ begin return query select * from public.s5_backtest_summary_since(null); end $$;
 
 create or replace function public.s5_backtest_summary_since(p_since date)
 returns table (horizon text, method text, n bigint, mae numeric, median_abs numeric, p90_abs numeric, bias numeric, within_2min numeric)
