@@ -169,6 +169,8 @@ select option{background:#121a24;color:#eef2f7}
 .ride .facts li:first-child{border-top:0}
 .ride .facts b{font-variant-numeric:tabular-nums}
 .ride .pick{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.ride .pick-head{margin:12px 0 0;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.ride .pick-other{margin-top:12px}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .chip{min-height:34px;padding:0 13px;border-radius:999px;border:1px solid var(--line);background:var(--surface-2);font-size:13px;font-weight:700}
 .chip[aria-pressed="true"]{background:var(--gold);border-color:var(--gold);color:var(--gold-ink)}
@@ -1026,6 +1028,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       const prev = b.hist.length > 1 ? b.hist[b.hist.length - 2] : null, h = Number(v.heading);
       b.heading = prev && distM(prev.ll, ll) > 25 ? bearingDeg(prev.ll, ll) : v.heading !== '' && Number.isFinite(h) ? h : null;
       classify(b);
+      if (b.dirId !== b.dirWas) { b.dirWas = b.dirId; b.dirSince = now; }
       probe(b);
     });
     Array.from(live.buses.keys()).forEach(id => { if (!seen.has(id)) live.buses.delete(id); });
@@ -1053,6 +1056,26 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
      - The other buses are paired together in road order: a bus further along is running an earlier departure. Each
        keeps its previous trip unless another fits clearly better. */
   const MATCH_SWITCH = 6, MATCH_UNMATCHED = 14, LOCK_MAX_LATE = 45;
+  // How late buses usually leave, where the departure log has no figure for the slot: out of Sandton about 4 minutes
+  // (median 4-6 on 26-27 Oct), out of Montecasino about 1.
+  const USUAL_LATE = { toSandton: 1, toMontecasino: 4 };
+  function usualLate(dirId, i) {
+    const r = rel.data && rel.data[dirId] && rel.data[dirId][hhmm(DIRS[dirId].starts[i])];
+    return r && r.ran >= 3 && Number.isFinite(Number(r.late)) ? Number(r.late) : USUAL_LATE[dirId];
+  }
+  // The timetabled departure a bus that left at minute `left` was running: the nearest free one, leaving early counting
+  // more than leaving late.
+  function departureSlot(dirId, left, taken) {
+    let best = null;
+    DIRS[dirId].starts.forEach((s0, i) => {
+      if (taken.has(i)) return;
+      const c = left - s0;
+      if (c < -6 || c > 20) return;
+      const cost = c >= 0 ? c : -c * 2.5;
+      if (!best || cost < best.cost) best = { i, cost };
+    });
+    return best ? best.i : null;
+  }
   // Departures the server's log has confirmed in the last two hours (public.s5_recent_departures), latest per bus, for
   // buses already on their way when the app opened. Asked when such a bus has no departure yet, at most every 3 minutes.
   live.departed = {}; live.departedAt = 0;
@@ -1088,19 +1111,21 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       // Seen leaving: it left between its last fix at the terminal and this one. Otherwise the server's departure log may know.
       const leftMs = moving && b.wasMonte ? (b.fix - b.monteFix <= 5 * MIN ? (b.monteFix + b.fix) / 2 : b.fix) : moving ? live.departed[b.id] : null;
       if (leftMs && now - leftMs < 70 * MIN) {
-        const left = (leftMs - ds) / MIN, taken = lockedTrips('toSandton');
-        let best = null;
-        DIRS.toSandton.starts.forEach((s0, i) => {
-          if (taken.has(i)) return;
-          const c = left - s0; // minutes after the timetabled departure; leaving early is rarer than leaving late
-          if (c < -6 || c > 20) return;
-          const cost = c >= 0 ? c : -c * 2.5;
-          if (!best || cost < best.cost) best = { i, cost };
-        });
-        if (best) { L.buses[b.id] = { dir: 'toSandton', i: best.i }; dirty = true; }
+        const i = departureSlot('toSandton', (leftMs - ds) / MIN, lockedTrips('toSandton'));
+        if (i != null) { L.buses[b.id] = { dir: 'toSandton', i }; dirty = true; }
       }
       if (b.at === 'monte') b.monteFix = b.fix;
       b.wasMonte = b.at === 'monte';
+      // Out of Sandton: live GPS can't tell routes apart there, but a bus last seen at the station stop that comes into
+      // view heading to Montecasino left about when it was last at the stop.
+      if (!b.old && distM(b.ll, OSM_STOPS[0]) < 150) b.sandtonAt = now;
+      if (b.dirId === 'toMontecasino' && !L.buses[b.id] && !b.old && b.pos <= 3 && b.sandtonAt && now - b.sandtonAt < 10 * MIN) {
+        const i = departureSlot('toMontecasino', (b.sandtonAt - ds) / MIN, lockedTrips('toMontecasino'));
+        if (i != null) { L.buses[b.id] = { dir: 'toMontecasino', i }; dirty = true; }
+      }
+      // A locked bus that has left the S5 (off the route for 5 minutes, away from Sandton's shared streets) frees its departure.
+      if (b.dirId || distM(b.ll, OSM_STOPS[0]) < SANDTON_SHARED_M + 800) b.offSince = 0; else if (!b.offSince) b.offSince = now;
+      if (L.buses[b.id] && b.offSince && now - b.offSince > 5 * MIN) drop(b.id);
     });
     live.trips = { toSandton: {}, toMontecasino: {} };
     Object.keys(DIRS).forEach(id => {
@@ -1124,7 +1149,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       const cost = (b, i) => {
         const late = t - dir.starts[i] - b.off; // minutes behind the timetable
         if (late < (b.at === 'monte' ? -8 : -6) || late > 25) return null;
-        return Math.abs(late - 1) + (b.prevTrip != null && b.prevTrip !== i ? MATCH_SWITCH : 0);
+        return Math.abs(late - usualLate(id, i)) + (b.prevTrip != null && b.prevTrip !== i ? MATCH_SWITCH : 0);
       };
       // Cheapest pairing of buses free[a..] with trips cand[j..], in road order (memoised).
       const memo = new Map();
@@ -1304,7 +1329,13 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       if (best) { ride.cand = best.id; ride.mode = 'confirm'; ride.auto = false; tick(true); }
       else if (ride.auto && now - ride.started > RIDE_AUTO_MS) rideStop(); // no bus around the commute time: stop, to save battery
     } else if (ride.mode === 'riding' && ride.on && !ride.on.busId) {
-      const b = live.trips[ride.on.dirId] && live.trips[ride.on.dirId][ride.on.trip];
+      // Picked as a departure before live GPS could see the bus. Attach the bus the phone's location matches; else the bus
+      // matched to that departure, if it's still near the start; else one that has only just come into view near the start.
+      const dir = ride.on.dirId, m = live.trips[dir] && live.trips[dir][ride.on.trip];
+      let b = null;
+      ride.fixes.forEach((arr, id) => { const x = live.buses.get(id); if (!b && x && x.dirId === dir && !x.old && rideRun(arr).run >= 2) b = x; });
+      if (!b && m && m.pos <= 3) b = m;
+      if (!b) b = Array.from(live.buses.values()).filter(x => x.dirId === dir && !x.old && x.pos <= 2.5 && x.dirSince >= ride.on.at - MIN).sort((p, q) => p.pos - q.pos)[0] || null;
       if (b) { ride.on.busId = b.id; ride.lastSeen = now; store.set('s5.ride', ride.on); tick(true); }
       else if (now - ride.on.at > 20 * MIN) rideEnd('Live GPS never picked up your bus, so the ride has ended');
     } else if (ride.mode === 'riding' && ride.on) {
@@ -1344,12 +1375,26 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     const dir = DIRS.toMontecasino, ds = dayStartMs(now), t = (now - ds) / MIN, seen = live.trips.toMontecasino || {};
     return dir.starts.map((s0, i) => ({ s0, i })).filter(x => !seen[x.i] && t >= x.s0 + state.delay - 2 && t <= x.s0 + state.delay + 10);
   }
+  // Buses grouped by direction: the direction on screen first, the other folded away. With the phone's location,
+  // each says how far it is, nearest first.
   function ridePickHtml() {
-    const list = Array.from(live.buses.values()).filter(b => b.dirId && !b.old).sort((p, q) => (p.dirId > q.dirId) - (p.dirId < q.dirId) || p.off - q.off);
-    const waiting = sandtonUnseen(Date.now());
-    if (!list.length && !waiting.length) return '<p>Live GPS can\'t see any S5 buses right now.</p>';
-    return '<div class="pick">' + waiting.map(x => '<button class="place" data-action="ride-pick-trip" data-dir="toMontecasino" data-i="' + x.i + '"><b>The ' + hhmm(x.s0) + ' to Montecasino</b><small>leaving Sandton Station</small></button>').join('') +
-      list.map(b => '<button class="place" data-action="ride-pick" data-bus="' + esc(b.id) + '"><b>' + esc(cap(busLabel(b))) + '</b><small>' + esc(busNear(b)) + '</small></button>').join('') + '</div>';
+    const ph = ride.track.length ? ride.track[ride.track.length - 1] : null, near = ph && ph.acc <= 1000 ? ph : null;
+    const away = b => near ? distM(near.ll, b.ll) : null;
+    const all = Array.from(live.buses.values()).filter(b => b.dirId && !b.old);
+    const busBtn = b => { const d = away(b);
+      return '<button class="place" data-action="ride-pick" data-bus="' + esc(b.id) + '"><b>' + esc(cap(busLabel(b))) + '</b><small>' + esc(busNear(b)) +
+        (d != null ? ' · ' + (d < 1000 ? Math.round(d / 50) * 50 + ' m' : (d / 1000).toFixed(1) + ' km') + ' from you' : '') + '</small></button>'; };
+    const group = id => {
+      const list = all.filter(b => b.dirId === id).sort((p, q) => near ? away(p) - away(q) : q.pos - p.pos);
+      const waiting = id === 'toMontecasino' ? sandtonUnseen(Date.now()) : [];
+      return waiting.map(x => '<button class="place" data-action="ride-pick-trip" data-dir="toMontecasino" data-i="' + x.i + '"><b>The ' + hhmm(x.s0) + ' to Montecasino</b><small>leaving Sandton Station · live GPS picks it out about 700 m from the station</small></button>').join('') +
+        list.map(busBtn).join('');
+    };
+    const want = state.dirId, other = want === 'toSandton' ? 'toMontecasino' : 'toSandton';
+    const mine = group(want), theirs = group(other);
+    if (!mine && !theirs) return '<p>Live GPS can\'t see any S5 buses right now.</p>';
+    return '<p class="pick-head">' + esc(DIRS[want].label) + '</p><div class="pick">' + (mine || '<p class="hint">No buses going this way on live GPS right now.</p>') + '</div>' +
+      (theirs ? '<details class="pick-other"><summary class="linklike">' + esc(DIRS[other].label) + ' (the other way)</summary><div class="pick">' + theirs + '</div></details>' : '');
   }
   // A ride picked by its departure before live GPS can see the bus: the bus is attached once GPS matches it to the trip.
   function rideConfirmTrip(dirId, i) {
