@@ -84,7 +84,7 @@ flowchart TB
       cron["pg_cron"]
       log[("Departure log<br/>s5_pos_log, s5_log_beat")]
       hist[("s5_departure_history")]
-      rel["s5_reliability<br/>public read-only summary"]
+      rel["s5_reliability, s5_recent_departures<br/>public read-only summaries"]
       pass[("s5_stop_passages<br/>when each trip reached each stop")]
       prof["s5_segment_profile<br/>learned minutes per stretch"]
       rides[("s5_rides<br/>opt-in ride summaries")]
@@ -238,3 +238,15 @@ factor; live traffic still adjusts it. *Why:* it measures exactly what riders ex
 not anyone's, and it improves every day the log runs. *Safeguards:* two days minimum, so one bad day can't set it;
 TomTom remains the fallback where there are too few trips. Rides confirmed by riders (opt-in, anonymous) are kept
 separately, to check which bus ran which departure.
+
+**ADR 14: A bus keeps the departure it left as.**
+The feed gives each bus's position, not which timetabled departure it is running, so the app pairs them. Pairing
+each bus with the departure its lateness fits best broke in the morning queue. On Tuesday 27 October bus 33002
+left Montecasino at 07:40 as the 07:37, then took 12 minutes to cover the first kilometre, so by 07:51 it "fitted"
+the 07:47 better and was relabelled, with a rider on board. Now a bus seen leaving Montecasino keeps that
+departure until it is back at the terminal or turns round. The pairing is saved on the phone for the day, and
+`s5_recent_departures` (departures in the departure log's last two hours: bus numbers and times only) covers an app
+opened mid-trip. The remaining buses are paired together in road order, so a bus further along is always running an
+earlier departure, and each keeps its previous departure unless another fits clearly better. *Why:* a departure is
+a fact once the bus leaves, and lateness that grows is the information riders need, not a reason to relabel the bus.
+*Tested* against the GPS of buses 33002 and 33011 that morning.

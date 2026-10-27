@@ -964,6 +964,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     if (!liveActive(now)) { if (live.buses.size || live.ok) { live.buses.clear(); live.ok = 0; matchTrips(now); } live.err = ''; return; }
     if (live.fetching || (document.visibilityState !== 'visible' && !state.alerts.some(al => !al.fired))) return;
     pollTraffic(now);
+    pollDepartures(now);
     live.fetching = true;
     const ctl = typeof AbortController === 'function' ? new AbortController() : null;
     const timer = setTimeout(() => { if (ctl) ctl.abort(); }, 12000);
@@ -1017,27 +1018,111 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     const p = posFromAlong(DIRS[b.dirId], s.d);
     b.pos = p.pos; b.off = p.off;
   }
-  // Pair each S5 bus with the timetable trip it is closest to, furthest-along bus first.
+  /* Pair each S5 bus with the timetable trip it is running.
+     - A bus seen leaving Montecasino keeps the departure it left as until it is back at the terminal (live.locks, saved
+       for the day so a reload keeps it). A bus crawling in the morning queue is then still "the 07:37", not relabelled
+       the 07:47 because its lateness fits that better.
+     - The other buses are paired together in road order: a bus further along is running an earlier departure. Each
+       keeps its previous trip unless another fits clearly better. */
+  const MATCH_SWITCH = 6, MATCH_UNMATCHED = 14, LOCK_MAX_LATE = 45;
+  // Departures the server's log has confirmed in the last two hours (public.s5_recent_departures), latest per bus, for
+  // buses already on their way when the app opened. Asked when such a bus has no departure yet, at most every 3 minutes.
+  live.departed = {}; live.departedAt = 0;
+  async function pollDepartures(now) {
+    if (now - live.departedAt < 3 * MIN) return;
+    const L = departureLocks(now);
+    if (live.departedAt && !Array.from(live.buses.values()).some(b => b.dirId === 'toSandton' && b.at !== 'monte' && !b.old && !L.buses[b.id])) return;
+    live.departedAt = now;
+    try {
+      const got = (await fetchVia([{ name: 'db', url: RPC + 's5_recent_departures', body: '{}' }], 'db')).data, d = {};
+      (Array.isArray(got) ? got : []).forEach(x => { const t = Date.parse(x.at); if (x.bus && t) d[String(x.bus)] = Math.max(d[String(x.bus)] || 0, t); });
+      live.departed = d;
+      matchTrips(Date.now()); tick(true);
+    } catch (e) { /* the live matching still works without it */ }
+  }
+  function departureLocks(now) {
+    const ds = dayStartMs(now);
+    let L = live.locks || store.get('s5.locks', null);
+    if (!L || L.day !== ds || !L.buses) L = { day: ds, buses: {} };
+    live.locks = L;
+    return L;
+  }
   function matchTrips(now) {
-    const ds = dayStartMs(now), t = (now - ds) / MIN;
+    const ds = dayStartMs(now), t = (now - ds) / MIN, L = departureLocks(now);
+    let dirty = false;
+    const drop = id => { delete L.buses[id]; dirty = true; };
+    const lockedTrips = dirId => new Set(Object.keys(L.buses).filter(k => L.buses[k].dir === dirId).map(k => L.buses[k].i));
+    Object.keys(L.buses).forEach(id => { const k = L.buses[id]; if (!DIRS[k.dir] || t - DIRS[k.dir].starts[k.i] > 120) drop(id); });
+    live.buses.forEach(b => {
+      const k = L.buses[b.id];
+      if (k && (b.at === 'monte' || (b.dirId && b.dirId !== k.dir))) drop(b.id); // back at the terminal, or turned round
+      const moving = b.at !== 'monte' && b.dirId === 'toSandton' && !L.buses[b.id] && !b.old;
+      // Seen leaving: it left between its last fix at the terminal and this one. Otherwise the server's departure log may know.
+      const leftMs = moving && b.wasMonte ? (b.fix - b.monteFix <= 5 * MIN ? (b.monteFix + b.fix) / 2 : b.fix) : moving ? live.departed[b.id] : null;
+      if (leftMs && now - leftMs < 70 * MIN) {
+        const left = (leftMs - ds) / MIN, taken = lockedTrips('toSandton');
+        let best = null;
+        DIRS.toSandton.starts.forEach((s0, i) => {
+          if (taken.has(i)) return;
+          const c = left - s0; // minutes after the timetabled departure; leaving early is rarer than leaving late
+          if (c < -6 || c > 20) return;
+          const cost = c >= 0 ? c : -c * 2.5;
+          if (!best || cost < best.cost) best = { i, cost };
+        });
+        if (best) { L.buses[b.id] = { dir: 'toSandton', i: best.i }; dirty = true; }
+      }
+      if (b.at === 'monte') b.monteFix = b.fix;
+      b.wasMonte = b.at === 'monte';
+    });
     live.trips = { toSandton: {}, toMontecasino: {} };
     Object.keys(DIRS).forEach(id => {
-      const dir = DIRS[id], used = new Set();
-      const list = Array.from(live.buses.values()).filter(b => b.dirId === id).sort((p, q) => q.off - p.off);
-      list.forEach(b => {
-        b.trip = null; b.late = 0;
+      const dir = DIRS[id], free = [];
+      Array.from(live.buses.values()).forEach(b => {
+        if (b.dirId !== id) return;
+        const prev = b.tripDir === id ? b.trip : null;
+        b.trip = null; b.late = 0; b.prevTrip = prev;
         if (b.old) return;
-        let best = null;
-        dir.starts.forEach((s, i) => {
-          if (used.has(i)) return;
-          const late = t - s - b.off; // minutes behind the timetable
-          if (late < (b.at === 'monte' ? -8 : -6) || late > 25) return;
-          const cost = Math.abs(late - 1);
-          if (!best || cost < best.cost) best = { i, late, cost };
-        });
-        if (best) { used.add(best.i); b.trip = best.i; b.late = best.late; live.trips[id][best.i] = b; }
+        const k = L.buses[b.id];
+        if (k && k.dir === id) {
+          const late = t - dir.starts[k.i] - b.off;
+          if (late <= LOCK_MAX_LATE) { b.trip = k.i; b.late = late; live.trips[id][k.i] = b; return; }
+          drop(b.id);
+        }
+        free.push(b);
+      });
+      const locked = lockedTrips(id);
+      const cand = dir.starts.map((s0, i) => i).filter(i => !locked.has(i)).sort((p, q) => dir.starts[p] - dir.starts[q]);
+      free.sort((p, q) => q.off - p.off || (p.prevTrip == null) - (q.prevTrip == null) || (p.prevTrip || 0) - (q.prevTrip || 0));
+      const cost = (b, i) => {
+        const late = t - dir.starts[i] - b.off; // minutes behind the timetable
+        if (late < (b.at === 'monte' ? -8 : -6) || late > 25) return null;
+        return Math.abs(late - 1) + (b.prevTrip != null && b.prevTrip !== i ? MATCH_SWITCH : 0);
+      };
+      // Cheapest pairing of buses free[a..] with trips cand[j..], in road order (memoised).
+      const memo = new Map();
+      const f = (a, j) => {
+        if (a === free.length) return { c: 0, pick: [] };
+        const key = a * 1000 + j;
+        if (memo.has(key)) return memo.get(key);
+        const skip = f(a + 1, j);
+        let best = { c: MATCH_UNMATCHED + skip.c, pick: [null].concat(skip.pick) };
+        for (let c = j; c < cand.length; c++) {
+          const x = cost(free[a], cand[c]);
+          if (x == null) continue;
+          const rest = f(a + 1, c + 1);
+          if (x + rest.c < best.c) best = { c: x + rest.c, pick: [cand[c]].concat(rest.pick) };
+        }
+        memo.set(key, best);
+        return best;
+      };
+      f(0, 0).pick.forEach((i, a) => {
+        if (i == null) return;
+        const b = free[a];
+        b.trip = i; b.late = t - dir.starts[i] - b.off; live.trips[id][i] = b;
       });
     });
+    live.buses.forEach(b => { b.tripDir = b.dirId; if (!b.dirId) { b.trip = null; b.late = 0; } });
+    if (dirty) store.set('s5.locks', L);
   }
   /* How each departure has done on recent weekdays, from the GPS departure log (public.s5_reliability). */
   const rel = { at: 0, data: null }, REL_POLL_MS = 6 * 3600000;

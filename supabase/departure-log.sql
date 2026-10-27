@@ -426,6 +426,19 @@ as $$
     from s group by dir) x
 $$;
 
+-- Montecasino departures in the last two hours, so an app opened mid-trip knows which departure each bus left as:
+-- [{"bus": "33002", "at": "2026-10-27T05:40:13Z"}, ...]. Bus fleet numbers and times only.
+create or replace function public.s5_recent_departures()
+returns jsonb
+language sql stable
+security definer
+set search_path = public
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object('bus', bus_id, 'at', departed_at) order by departed_at), '[]')
+  from public.s5_monte_departures((now() at time zone 'Africa/Johannesburg')::date)
+  where departed_at > now() - interval '2 hours'
+$$;
+
 create or replace function public.s5_departure_nightly()
 returns void
 language plpgsql
@@ -457,6 +470,7 @@ revoke all on function public.s5_log_tick(), public.s5_monte_departures(date), p
   public.s5_covered(timestamptz, timestamptz),
   public.s5_departure_nightly() from public, anon, authenticated;
 grant execute on function public.s5_reliability(int) to anon, authenticated;
+grant execute on function public.s5_recent_departures() to anon, authenticated;
 
 select cron.schedule('s5-log-tick', '30 seconds', 'select public.s5_log_tick()');
 select cron.schedule('s5-departure-nightly', '30 20 * * 1-5', 'select public.s5_departure_nightly()');  -- 22:30 SAST
