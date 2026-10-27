@@ -263,10 +263,17 @@ average error for trips 10–20 min ahead):*
 - the buses ahead on the same stretch in the last 40 min: 2.5 min (53% of predictions within 2 min, against 18% for
   the app)
 
-Live TomTom traffic isn't logged, so it can't be scored yet.
+Live TomTom traffic wasn't logged then, so it couldn't be scored (it is logged from 27 Oct, see below).
 
 So the app now puts the buses ahead first. `s5_recent_legs` returns the median minutes S5 buses took on each stretch
 in the last 40 minutes (bus timings only). The app asks for it every 2 minutes while live GPS runs, and uses it for
 stretches a bus reaches within the next 30 minutes, fading back to the other sources by 75 minutes. A single bus far
 out of line is ignored (more than 3× the timetable's minutes + 6). Where no bus has passed recently, the order is as
 before: live traffic, then learned medians, then TomTom.
+
+The backtest runs every weekday night at 23:05 (`s5-backtest-nightly`, last three days), and also scores "shipped",
+the app's full current logic (2.5 min at 10–20 min ahead on the first three days). Live TomTom traffic is logged every
+5 minutes on weekdays from 05:00 to 22:00 (`supabase/traffic-log.sql`, `s5_traffic_log`, kept 30 days) by asking the
+`s5-traffic` Edge Function as the app does, so the key stays a secret there and its cache is shared: at most ~410 TomTom
+requests a weekday. The backtest then scores "live", the app's live-traffic adjustment, from the snapshot the app would
+have had.
