@@ -225,6 +225,13 @@ select option{background:#121a24;color:#eef2f7}
 .bus.est.you{background:var(--surface);color:var(--gold);border-color:var(--gold)}
 .bus.live .lv{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(61,220,151,.3)}
 .bus .dn{width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid currentColor;opacity:.8}
+.bus.eta{height:38px;margin-top:-19px;border-radius:12px;flex-direction:column;align-items:flex-start;justify-content:center;gap:1px;padding:0 9px}
+.bus .r1{display:flex;align-items:center;gap:4px}
+.bus .r2{display:flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;opacity:.85}
+.bus .pin{width:7px;height:7px;flex:none}
+.bus .pin.board{border-radius:50%;border:2px solid var(--gold)}
+.bus .pin.alight{border-radius:2px;background:var(--blue)}
+.bus.you .pin.board{border-color:currentColor}
 .livebar{display:flex;align-items:center;gap:8px;margin-top:12px;padding:9px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);font-size:12.5px;color:var(--muted)}
 .livebar .d{width:8px;height:8px;border-radius:50%;flex:none;background:var(--faint)}
 .livebar.on .d{background:var(--green);box-shadow:0 0 0 4px rgba(61,220,151,.18)}
@@ -2071,9 +2078,22 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       if (seen.has(x.i)) return;
       const held = blindOut && nowMin - x.startMin <= 12;
       const pos = held ? Math.min(x.pos, 0) : x.pos;
-      out.push({ pos, i: x.i, live: false, est: m.liveOn, unseen: held, you: x.i === heroI, label: hhmm(x.startMin), near: dir.stops[held ? 0 : x.k] });
+      out.push({ pos, i: x.i, live: false, est: m.liveOn, unseen: held, you: x.i === heroI, label: hhmm(x.startMin), near: dir.stops[held ? 0 : x.k], startMin: x.startMin });
     });
+    out.forEach(x => { x.eta = busEta(m, x); });
     return out;
+  }
+  // When a bus on the stop list should reach your boarding stop, or, once past it, where you get off (none once past both).
+  function busEta(m, x) {
+    const dir = m.dir, k = x.pos < m.b - 0.25 ? m.b : x.pos < m.a - 0.25 ? m.a : -1;
+    if (k < 0) return null;
+    const nowMin = (m.now - m.todayStart) / MIN;
+    let ms;
+    if (x.wait || x.unseen) { // still at the terminal: it sets off at its departure time at the earliest
+      const go = Math.max(nowMin, x.startMin != null ? x.startMin : x.i != null ? dir.starts[x.i] : nowMin);
+      ms = m.todayStart + (go + runMin(dir, 0, k, go)) * MIN;
+    } else ms = m.now + runMin(dir, Math.max(0, Math.min(x.pos, k)), k, nowMin) * MIN;
+    return { k, ms, at: k === m.b ? 'board' : 'alight' };
   }
   function routeHeadHtml(m) {
     const dir = m.dir, h = m.hero, isToday = m.mode === 'today';
@@ -2126,18 +2146,25 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       return e != null && Math.abs(e - sched) >= MIN ? '<small class="exp' + (lvBus ? ' lv' : '') + '">~' + hhmmMs(e) + '</small>' : '';
     }
     let markers = buses.map(x => {
-      const cls = 'bus' + (x.you ? ' you' : '') + (x.live ? ' live' : x.est ? ' est' : '');
-      const what = x.unseen ? (x.you ? 'Your bus' : 'S5 bus') + ' that leaves at ' + x.label + ', not seen by live GPS yet (it picks out S5 buses about 700 m from Sandton Station)' : (x.you ? 'Your bus' : 'S5 bus') + (x.i != null ? ' that left at ' + x.label : '') + (x.wait ? ', waiting at ' : ', near ') + stopTitle(x.near) + (x.live ? ' (live GPS)' : ' (estimated from the timetable)');
+      const cls = 'bus' + (x.you ? ' you' : '') + (x.live ? ' live' : x.est ? ' est' : '') + (x.eta ? ' eta' : '');
+      const due = x.eta ? ', due at ' + stopTitle(dir.stops[x.eta.k]) + (x.eta.at === 'board' ? ' (where you board)' : ' (where you get off)') + ' about ' + hhmmMs(x.eta.ms) : '';
+      const what =x.unseen ? (x.you ? 'Your bus' : 'S5 bus') + ' that leaves at ' + x.label + ', not seen by live GPS yet (it picks out S5 buses about 700 m from Sandton Station)' : (x.you ? 'Your bus' : 'S5 bus') + (x.i != null ? ' that left at ' + x.label : '') + (x.wait ? ', waiting at ' : ', near ') + stopTitle(x.near) + (x.live ? ' (live GPS)' : ' (estimated from the timetable)');
       // The arrow points the way it's heading: down the list, towards the next stop.
-      return '<div class="' + cls + '" style="top:' + y(x.pos) + 'px" role="img" aria-label="' + esc(what) + '">' + (x.live ? '<i class="lv"></i>' : ICON.bus) + x.label + (x.wait ? '' : '<i class="dn"></i>') + '</div>';
+      const head = (x.live ? '<i class="lv"></i>' : ICON.bus) + x.label + (x.wait ? '' : '<i class="dn"></i>');
+      return '<div class="' + cls + '" style="top:' + y(x.pos) + 'px" role="img" aria-label="' + esc(what + due) + '">' +
+        (x.eta ? '<span class="r1">' + head + '</span><span class="r2"><i class="pin ' + x.eta.at + '"></i>~' + hhmmMs(x.eta.ms) + '</span>' : head) + '</div>';
     }).join('');
     if (isToday && !mine && h.startMs > m.now && h.startMs - m.now <= 20 * MIN) {
-      markers += '<div class="bus sched" style="top:' + y(0) + 'px" role="img" aria-label="Your bus, scheduled to leave at ' + hhmm(h.startMin) + '">' + ICON.bus + hhmm(h.startMin) + '</div>';
+      const e = busEta(m, { pos: 0, wait: true, i: h.i, startMin: h.startMin });
+      markers += '<div class="bus sched' + (e ? ' eta' : '') + '" style="top:' + y(0) + 'px" role="img" aria-label="Your bus, scheduled to leave at ' + hhmm(h.startMin) +
+        (e ? ', due at ' + stopTitle(dir.stops[e.k]) + ' about ' + hhmmMs(e.ms) : '') + '">' +
+        (e ? '<span class="r1">' + ICON.bus + hhmm(h.startMin) + '</span><span class="r2"><i class="pin ' + e.at + '"></i>~' + hhmmMs(e.ms) + '</span>' : ICON.bus + hhmm(h.startMin)) + '</div>';
     }
     const done = mine ? '<div class="rail-done" style="top:' + y(0) + 'px;height:' + Math.max(0, y(mine.pos) - y(0)) + 'px"></div>' : '';
     return '<div class="track-cap"><span>Stop</span><span>' + (isToday ? 'Your ' + hhmm(h.depMin) + ' bus' : 'First bus') + '</span></div>' +
       '<div class="track" style="height:' + (n * ROW) + 'px"><div class="rail" style="top:' + y(0) + 'px;height:' + (last * ROW) + 'px"></div>' + done + rows + markers + '</div>' +
-      '<p class="foot">' + (m.liveOn ? 'Buses with a green dot are live GPS positions. Dashed ones are estimated from the timetable, because live GPS can\'t see them.' +
+      '<p class="foot">' + (buses.some(x => x.eta) ? 'The time under each bus is when it should reach your stop (circle) or, once past it, where you get off (square). ' : '') +
+        (m.liveOn ? 'Buses with a green dot are live GPS positions. Dashed ones are estimated from the timetable, because live GPS can\'t see them.' +
         (dir.id === 'toMontecasino' ? ' Other routes share the streets around Sandton Station, so live GPS picks out an S5 only about 700 m from the station; until then a bus that has just left shows at the station.' : '') : 'Positions are estimated from the timetable' + (state.delay ? ' (shifted +' + state.delay + ' min)' : '') + '.') + ' Stop times are for your bus as scheduled; the small time under one is when it should really get there' + (lvBus ? ' (live GPS' + (liveTrafficSource(m.now) ? ' and live traffic)' : ')') : liveTrafficSource(m.now) ? ' in live traffic (' + liveTrafficSource(m.now) + ')' : ' in typical traffic') + '.' + (learnedAny(dir.id) ? ' Typical times come from S5 trips the app has recorded, and from TomTom where there aren\'t enough yet.' : ' Typical traffic comes from TomTom.') + ' Where\'s my bus? Call ' + INFO_LINE + '.</p>';
   }
 
