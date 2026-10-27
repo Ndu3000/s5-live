@@ -84,7 +84,7 @@ flowchart TB
       cron["pg_cron"]
       log[("Departure log<br/>s5_pos_log, s5_log_beat")]
       hist[("s5_departure_history")]
-      rel["s5_reliability, s5_recent_departures<br/>public read-only summaries"]
+      rel["s5_reliability, s5_recent_departures, s5_recent_legs<br/>public read-only summaries"]
       pass[("s5_stop_passages<br/>when each trip reached each stop")]
       prof["s5_segment_profile<br/>learned minutes per stretch"]
       rides[("s5_rides<br/>opt-in ride summaries")]
@@ -264,3 +264,9 @@ average error for trips 10–20 min ahead):*
   the app)
 
 Live TomTom traffic isn't logged, so it can't be scored yet.
+
+So the app now puts the buses ahead first. `s5_recent_legs` returns the median minutes S5 buses took on each stretch
+in the last 40 minutes (bus timings only). The app asks for it every 2 minutes while live GPS runs, and uses it for
+stretches a bus reaches within the next 30 minutes, fading back to the other sources by 75 minutes. A single bus far
+out of line is ignored (more than 3× the timetable's minutes + 6). Where no bus has passed recently, the order is as
+before: live traffic, then learned medians, then TomTom.

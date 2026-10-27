@@ -120,6 +120,43 @@ language sql stable security definer set search_path = public as $$
     group by dir) y
 $$;
 
+-- The buses ahead: median minutes S5 buses took on each stretch in the last 40 minutes, from their GPS, for the app's
+-- arrival estimates (ADR 15: in the backtest this halved the error). Bus timings only.
+-- {"at": "...", "toSandton": {"3": [2.4, 2], ...}, "toMontecasino": {...}}: [median minutes, buses]
+create or replace function public.s5_recent_legs()
+returns jsonb
+language sql stable security definer set search_path = public as $$
+  with trips as (
+    -- out of Montecasino (from the departure log), until the bus reaches Sandton
+    select 'toSandton'::text as dir, m.bus_id, m.departed_at as t0, coalesce(m.sandton_at, now()) as t1
+    from public.s5_monte_departures((now() at time zone 'Africa/Johannesburg')::date) m
+    where m.departed_at > now() - interval '150 minutes'
+    union all
+    -- out of Sandton Station (last seen there), until the bus reaches Montecasino
+    select 'toMontecasino', s.bus_id, s.left_at,
+      coalesce((select min(l.fix_at) from public.s5_pos_log l where l.bus_id = s.bus_id and l.fix_at > s.left_at
+                  and public.s5_dist_m(l.lat, l.lon, -26.02466, 28.0114) < 150), now())
+    from (select l.bus_id, max(l.seen_at) as left_at from public.s5_pos_log l
+          where l.fix_at > now() - interval '120 minutes' and public.s5_dist_m(l.lat, l.lon, -26.10801, 28.05673) < 150
+          group by l.bus_id) s
+  ), pass as (
+    select t.dir, t.bus_id, p.stop_idx, p.passed_at
+    from trips t cross join lateral public.s5_trip_passages(t.bus_id, t.dir, t.t0, t.t1) p
+  ), legs as (
+    -- consecutive stops, in order, ending in the last 40 minutes
+    select a.dir, a.stop_idx as leg, extract(epoch from b.passed_at - a.passed_at) / 60 as mins
+    from pass a join pass b on b.dir = a.dir and b.bus_id = a.bus_id and b.stop_idx = a.stop_idx + 1
+    where b.passed_at > a.passed_at and b.passed_at > now() - interval '40 minutes'
+      and b.passed_at - a.passed_at < interval '30 minutes'
+  ), agg as (
+    select dir, leg, percentile_cont(0.5) within group (order by mins) as med, count(*) as n from legs group by dir, leg
+  )
+  select jsonb_build_object('at', now()) || coalesce((select jsonb_object_agg(dir, x) from (
+    select dir, jsonb_object_agg(leg::text, jsonb_build_array(round(med::numeric, 2), n)) as x from agg group by dir) y), '{}')
+$$;
+revoke all on function public.s5_recent_legs() from public;
+grant execute on function public.s5_recent_legs() to anon, authenticated;
+
 -- Rides confirmed with "I'm on a bus", shared only with consent. Not linked to a phone or person.
 create table if not exists public.s5_rides (
   id uuid primary key default gen_random_uuid(),
