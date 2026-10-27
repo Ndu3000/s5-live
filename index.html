@@ -1228,9 +1228,15 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   const RIDE_CONSENT = 'rides-2026-10-26';
   const ridesShared = () => !!(state.rideShare && state.rideShare.v === RIDE_CONSENT);
   const stopAt = b => Math.min(lastIdx(DIRS[b.dirId]), Math.max(0, Math.round(b.at === 'monte' ? 0 : b.pos)));
+  // The end of the line for a ride. Within ~700 m of Sandton Station live GPS can't say which route a bus is on, and at
+  // Montecasino a bus counts as the next trip out, so for the bus being ridden its distance to the stop settles it.
+  const RIDE_END_M = 150;
+  const atLineEnd = (r, b) => !!(b && !b.old && r.last && r.last.stop >= lastIdx(DIRS[r.dirId]) - 4 &&
+    distM(b.ll, r.dirId === 'toSandton' ? OSM_STOPS[0] : OSM_STOPS[MONTE]) < RIDE_END_M);
   function shareRide(r, b, ended) {
     if (!ridesShared() || !r.board) return;
-    const dir = DIRS[r.dirId], endStop = ended === 'last stop' ? lastIdx(dir) : stopAt(b);
+    const dir = DIRS[r.dirId];
+    const endStop = ended === 'last stop' || atLineEnd(r, b) ? lastIdx(dir) : b && b.dirId === r.dirId ? stopAt(b) : r.last ? r.last.stop : r.board.stop;
     rpcPost('s5_share_ride', { p_consent: RIDE_CONSENT, p_dir: r.dirId, p_scheduled: r.trip != null ? hhmm(dir.starts[r.trip]) : null, p_bus: r.busId, p_how: r.how,
       p_board_stop: r.board.stop, p_board_at: new Date(r.board.at).toISOString(), p_end_stop: Math.max(endStop, r.board.stop), p_end_at: new Date().toISOString(), p_ended: ended }).catch(() => { /* best effort */ });
   }
@@ -1242,7 +1248,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     store.set('s5.ride', ride.on); tick(true);
   }
   function rideEnd(msg, ended) {
-    if (ride.on && ended) { const b = live.buses.get(ride.on.busId); if (b && b.dirId === ride.on.dirId) shareRide(ride.on, b, ended); }
+    if (ride.on && ended && ride.on.busId) shareRide(ride.on, live.buses.get(ride.on.busId), ended);
     ride.on = null; store.set('s5.ride', null); rideStopWatch(); ride.mode = 'idle'; ride.track = [];
     if (msg) toast(msg);
     tick(true);
@@ -1251,7 +1257,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
   function rideObserve(now) {
     const cut = now - RIDE_KEEP_MS;
     live.buses.forEach(b => {
-      if (!b.dirId || b.old) return;
+      if (b.old || (!b.dirId && !(ride.on && ride.on.busId === b.id))) return; // the bus being ridden is followed everywhere
       const arr = ride.fixes.get(b.id) || [];
       if (!arr.length || arr[arr.length - 1].t !== b.fix) arr.push({ t: b.fix, ll: b.ll });
       ride.fixes.set(b.id, arr.filter(x => x.t >= cut));
@@ -1275,8 +1281,12 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       else if (now - ride.on.at > 20 * MIN) rideEnd('Live GPS never picked up your bus, so the ride has ended');
     } else if (ride.mode === 'riding' && ride.on) {
       const b = live.buses.get(ride.on.busId), dir = DIRS[ride.on.dirId];
-      if (b && b.dirId === ride.on.dirId && b.trip != null) ride.on.trip = b.trip;
-      if (b && b.dirId === ride.on.dirId && b.pos >= lastIdx(dir) - 0.25) { rideEnd('You\'ve reached ' + stopTitle(dir.stops[lastIdx(dir)]), 'last stop'); return; }
+      if (b && b.dirId === ride.on.dirId) {
+        if (b.trip != null) ride.on.trip = b.trip;
+        const k = Math.max(stopAt(b), ride.on.board ? ride.on.board.stop : 0);
+        if (!ride.on.last || ride.on.last.stop !== k) { ride.on.last = { stop: k, at: now }; store.set('s5.ride', ride.on); }
+      }
+      if (b && ((b.dirId === ride.on.dirId && b.pos >= lastIdx(dir) - 0.25) || atLineEnd(ride.on, b))) { rideEnd('You\'ve reached ' + stopTitle(dir.stops[lastIdx(dir)]), 'last stop'); return; }
       if (!b && now - ride.on.at > 5 * MIN && now - (ride.lastSeen || ride.on.at) > 5 * MIN) { rideEnd('Your bus has dropped out of live GPS, so the ride has ended'); return; }
       if (b) ride.lastSeen = now;
       // Got off: the phone has been well away from the bus for its last two reports.
@@ -1337,13 +1347,16 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
         '<div class="actions"><button class="btn" data-action="ride-no">No</button><button class="btn primary" data-action="ride-yes">Yes, that\'s my bus</button></div></section>';
     }
     // Riding
-    const r = ride.on, dir = DIRS[r.dirId], b = live.buses.get(r.busId), last = lastIdx(dir), now = m.now, nowMin = (now - m.todayStart) / MIN;
+    const r = ride.on, dir = DIRS[r.dirId], seenB = live.buses.get(r.busId), last = lastIdx(dir), now = m.now, nowMin = (now - m.todayStart) / MIN;
+    const b = seenB && seenB.dirId === r.dirId ? seenB : null; // on the S5 in the ride's direction
     const title = '<div class="row1"><h3>On ' + esc(b ? busLabel(b) : (r.trip != null ? 'the ' + hhmm(dir.starts[r.trip]) + ' ' : 'your ') + toPhrase(dir)) + (b ? ' <em class="gps">LIVE</em>' : '') + '</h3><button class="chip" data-action="ride-off">I got off</button></div>';
     if (!b && !r.busId) {
       const go = Math.max(nowMin, dir.starts[r.trip] + state.delay), arr = m.todayStart + (go + runMin(dir, 0, last, go)) * MIN;
       return '<section class="card ride on">' + title + '<p>Live GPS picks out S5 buses about 700 m from Sandton Station, because other routes share the streets there. Your bus will show here once it does.</p>' +
         '<ul class="facts"><li><span>' + esc(stopTitle(dir.stops[last])) + ' (estimate)</span><b>~' + hhmmMs(arr) + '</b></li></ul></section>';
     }
+    if (!b && seenB && !seenB.old && r.last && r.last.stop >= last - 4)
+      return '<section class="card ride on">' + title + '<p>Bus ' + esc(r.busId) + ' is nearly at ' + esc(stopTitle(dir.stops[last])) + '. Other routes share the streets here, so live GPS can\'t follow it stop by stop. The ride ends when the bus reaches the stop, or when you tap I got off.</p></section>';
     if (!b) return '<section class="card ride on">' + title + '<p>Bus ' + esc(r.busId) + ' isn\'t on live GPS right now. Waiting for it to report again.</p></section>';
     const at = k => {
       const lv = b.trip != null && live.trips[r.dirId] && live.trips[r.dirId][b.trip] === b ? liveFor(r.dirId, b.trip, k, now) : null;
@@ -1536,9 +1549,11 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
      Shown only when turned on in Settings (or by a personal setup link). The first mile starts, and the last mile
      ends, at saved places, which are kept on this device. */
   const hm = (h, m, sec = 0) => h * 60 + m + sec / 60;
-  // Gautrain North–South line on weekdays, from Gautrain's journey planner (sampled for 23 Oct 2026).
+  // Gautrain North–South line on weekdays, from Gautrain's journey planner (sampled for 23 Oct 2026). The planner gives
+  // 9.7 min Sandton to Midrand; a rider timed 11 min on two mornings (08:27 train at Midrand 08:39 on 26 Oct, 08:37 at
+  // 08:49 on 27 Oct), so the plan uses that.
   const TRAINS = {
-    north: { from: 'Sandton', to: 'Midrand', ride: 9.72, deps: Array.from({ length: 19 }, (_, k) => hm(5, 37, 48) + 10 * k).concat([hm(8, 57, 48), hm(9, 18, 48), hm(9, 38, 48), hm(9, 58, 48), hm(10, 18, 48), hm(10, 38, 48)]) },
+    north: { from: 'Sandton', to: 'Midrand', ride: 11.2, deps: Array.from({ length: 19 }, (_, k) => hm(5, 37, 48) + 10 * k).concat([hm(8, 57, 48), hm(9, 18, 48), hm(9, 38, 48), hm(9, 58, 48), hm(10, 18, 48), hm(10, 38, 48)]) },
     south: { from: 'Midrand', to: 'Sandton', ride: 9.97, deps: [hm(14, 7, 50), hm(14, 27, 50)].concat(Array.from({ length: 23 }, (_, k) => hm(14, 48, 30) + 10 * k), [hm(18, 39, 30), hm(18, 59, 30), hm(19, 19, 30), hm(19, 39, 30), hm(19, 59, 30), hm(20, 19, 30), hm(20, 39, 30), hm(20, 59, 30)]) }
   };
   // Ride times are sampled at these times of day: towards Montecasino in the morning, away from it in the evening.
