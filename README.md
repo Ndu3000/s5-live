@@ -250,3 +250,17 @@ opened mid-trip. The remaining buses are paired together in road order, so a bus
 earlier departure, and each keeps its previous departure unless another fits clearly better. *Why:* a departure is
 a fact once the bus leaves, and lateness that grows is the information riders need, not a reason to relabel the bus.
 *Tested* against the GPS of buses 33002 and 33011 that morning.
+
+**ADR 15: Arrival-time methods are compared by backtest before they ship.**
+`supabase/backtest.sql` (owner only) replays every trip in `s5_stop_passages`. From each stop a trip passed, it
+predicts the time to every later stop the way each method would have at that moment, then compares with when the
+bus really got there. Learned medians come only from other days, so no method sees the answer. *Why:* a change to
+the arrival times should be measured, not guessed. *First run (23, 26 and 27 Oct; 200 trips, 25,606 predictions;
+average error for trips 10–20 min ahead):*
+- timetable: 6.4 min
+- TomTom typical traffic: 6.4 min
+- the app's learned medians: 5.4 min (with 3 days they cover only 0–31% of stretches)
+- the buses ahead on the same stretch in the last 40 min: 2.5 min (53% of predictions within 2 min, against 18% for
+  the app)
+
+Live TomTom traffic isn't logged, so it can't be scored yet.
