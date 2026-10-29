@@ -24,7 +24,8 @@ begin
   r := extensions.http_get('https://www.gautrain.co.za/');
   if r.status <> 200 then return -1; end if;
   for m in select regexp_matches(r.content,
-      '<li>\s*<img[^>]*src="/img/ticker_([a-z0-9_-]+)\.png"[^>]*>\s*<span>(.*?)</span>\s*<span class="tickerTapeMsg">(.*?)</span>', 'gis') loop
+      -- (each part runs up to its own </span>; PostgreSQL doesn't honour a lazy .*? next to greedy quantifiers)
+      '<li>\s*<img[^>]*src="/img/ticker_([a-z0-9_-]+)\.png"[^>]*>\s*<span>((?:[^<]|<(?!/span>))*)</span>\s*<span class="tickerTapeMsg">((?:[^<]|<(?!/span>))*)</span>', 'gi') loop
     v_title := btrim(regexp_replace(regexp_replace(m[2], '<[^>]+>', ' ', 'g'), '\s+', ' ', 'g'));
     v_msg := btrim(regexp_replace(regexp_replace(m[3], '<[^>]+>', ' ', 'g'), '\s+', ' ', 'g'));
     for i in 1 .. array_length(ent, 1) / 2 loop
