@@ -31,7 +31,7 @@ begin
     for i in 1 .. array_length(ent, 1) / 2 loop
       v_title := replace(v_title, ent[2 * i - 1], ent[2 * i]); v_msg := replace(v_msg, ent[2 * i - 1], ent[2 * i]);
     end loop;
-    continue when v_msg = '';
+    continue when v_msg = '' or length(v_msg) > 500;  -- a ticker notice is a sentence or two; more is a misread page
     -- the same notice still showing (seen in the last 15 minutes): extend it; otherwise it's a new one
     select id into v_id from public.s5_service_notices
       where level = m[1] and title = v_title and message = v_msg and last_seen > now() - interval '15 minutes'
@@ -43,7 +43,7 @@ begin
     end if;
     n := n + 1;
   end loop;
-  delete from public.s5_service_notices where last_seen < now() - interval '12 months';
+  delete from public.s5_service_notices where last_seen < now() - interval '12 months' or length(message) > 500;
   return n;  -- notices on the page now; 0 means the page's layout changed and the reader needs a look
 end $$;
 revoke all on function public.s5_service_notices_tick() from public, anon, authenticated;

@@ -1297,13 +1297,14 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     if (!ridesShared() || !r.board) return;
     const dir = DIRS[r.dirId];
     const endStop = ended === 'last stop' || atLineEnd(r, b) ? lastIdx(dir) : b && b.dirId === r.dirId ? stopAt(b) : r.last ? r.last.stop : r.board.stop;
+    if (endStop <= r.board.stop) return; // never left the stop where it was confirmed: nothing to learn, and maybe the wrong bus
     rpcPost('s5_share_ride', { p_consent: RIDE_CONSENT, p_dir: r.dirId, p_scheduled: r.trip != null ? hhmm(dir.starts[r.trip]) : null, p_bus: r.busId, p_how: r.how,
       p_board_stop: r.board.stop, p_board_at: new Date(r.board.at).toISOString(), p_end_stop: Math.max(endStop, r.board.stop), p_end_at: new Date().toISOString(), p_ended: ended }).catch(() => { /* best effort */ });
   }
   function rideConfirm(id, how) {
     const b = live.buses.get(id);
     if (!b || !b.dirId) { toast('That bus has dropped out of live GPS; try again in a moment'); return; }
-    ride.on = { busId: id, dirId: b.dirId, trip: b.trip, at: Date.now(), how, board: { stop: stopAt(b), at: Date.now() } };
+    ride.on = { busId: id, dirId: b.dirId, trip: b.at === 'monte' ? null : b.trip, at: Date.now(), how, board: { stop: stopAt(b), at: Date.now() } };
     ride.mode = 'riding'; ride.cand = null; ride.away = 0;
     store.set('s5.ride', ride.on); tick(true);
   }
@@ -1348,7 +1349,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     } else if (ride.mode === 'riding' && ride.on) {
       const b = live.buses.get(ride.on.busId), dir = DIRS[ride.on.dirId];
       if (b && b.dirId === ride.on.dirId) {
-        if (b.trip != null) ride.on.trip = b.trip;
+        if (b.trip != null && b.at !== 'monte') ride.on.trip = b.trip; // the departure it left as, once it has left
         const k = Math.max(stopAt(b), ride.on.board ? ride.on.board.stop : 0);
         if (!ride.on.last || ride.on.last.stop !== k) { ride.on.last = { stop: k, at: now }; store.set('s5.ride', ride.on); }
       }
@@ -1374,7 +1375,15 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     if (!near(am) && !pm) return;
     navigator.permissions.query({ name: 'geolocation' }).then(st => { if (st.state === 'granted' && ride.mode === 'idle' && !ride.on) rideStart(true); }).catch(() => { /* not supported */ });
   }
-  const busLabel = b => (b.trip != null ? 'the ' + hhmm(DIRS[b.dirId].starts[b.trip]) + ' ' : 'an S5 ') + toPhrase(DIRS[b.dirId]);
+  // A bus waiting at Montecasino hasn't left as any departure yet: which one it is is settled when it leaves.
+  const busLabel = b => (b.at === 'monte' ? 'the next bus ' : b.trip != null ? 'the ' + hhmm(DIRS[b.dirId].starts[b.trip]) + ' ' : 'an S5 ') + toPhrase(DIRS[b.dirId]);
+  function waitNote(b) {
+    if (b.at !== 'monte' || b.trip == null) return '';
+    const dir = DIRS[b.dirId], r = relFor(b.dirId, b.trip), nxt = dir.starts[b.trip + 1];
+    const shaky = r && r.ran / r.n < 0.6 && nxt != null;
+    return 'Timetabled next: the ' + hhmm(dir.starts[b.trip]) + (shaky ? ', which ' + relMissed(r) + ', so this bus may leave as the ' + hhmm(nxt) : '') +
+      '. The app confirms the departure when it leaves.';
+  }
   const busNear = b => (b.at === 'monte' ? 'waiting at ' : 'near ') + stopTitle(DIRS[b.dirId].stops[Math.min(lastIdx(DIRS[b.dirId]), Math.max(0, Math.round(b.pos)))]);
   // Departures from Sandton in the last 10 minutes that live GPS hasn't matched to a bus yet: they may still be in
   // the stretch around the station where other routes share the streets.
@@ -1390,7 +1399,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     const all = Array.from(live.buses.values()).filter(b => b.dirId && !b.old);
     const busBtn = b => { const d = away(b);
       return '<button class="place" data-action="ride-pick" data-bus="' + esc(b.id) + '"><b>' + esc(cap(busLabel(b))) + '</b><small>' + esc(busNear(b)) +
-        (d != null ? ' · ' + (d < 1000 ? Math.round(d / 50) * 50 + ' m' : (d / 1000).toFixed(1) + ' km') + ' from you' : '') + '</small></button>'; };
+        (d != null ? ' · ' + (d < 1000 ? Math.round(d / 50) * 50 + ' m' : (d / 1000).toFixed(1) + ' km') + ' from you' : '') +
+        (waitNote(b) ? ' · ' + esc(waitNote(b)) : '') + '</small></button>'; };
     const group = id => {
       const list = all.filter(b => b.dirId === id).sort((p, q) => near ? away(p) - away(q) : q.pos - p.pos);
       const waiting = id === 'toMontecasino' ? sandtonUnseen(Date.now()) : [];
@@ -1423,7 +1433,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     if (ride.mode === 'confirm') {
       const b = live.buses.get(ride.cand);
       if (!b) { ride.mode = 'searching'; ride.cand = null; return rideHtml(m); }
-      return '<section class="card ride ask" role="alert"><h3>Looks like you\'re on ' + esc(busLabel(b)) + '</h3><p>Bus ' + esc(b.id) + ', ' + esc(busNear(b)) + '. Is that right?</p>' +
+      return '<section class="card ride ask" role="alert"><h3>Looks like you\'re on ' + esc(busLabel(b)) + '</h3><p>Bus ' + esc(b.id) + ', ' + esc(busNear(b)) + '. Is that right?' + (waitNote(b) ? ' ' + esc(waitNote(b)) : '') + '</p>' +
         '<div class="actions"><button class="btn" data-action="ride-no">No</button><button class="btn primary" data-action="ride-yes">Yes, that\'s my bus</button></div></section>';
     }
     // Riding
@@ -1454,7 +1464,8 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
     const ask = state.rideShare ? '' : '<div class="share-status"><b>Help make arrival times more accurate?</b> When a ride ends, share only the bus, its departure, and the stops and times where your ride was confirmed and ended. Never your location, and not linked to you or this phone.' +
       '<div class="actions"><button class="btn" data-action="rides-no">No thanks</button><button class="btn primary" data-action="rides-yes">Share my rides</button></div>' +
       '<p class="hint"><button class="linklike" data-action="privacy">Privacy notice</button></p></div>';
-    return '<section class="card ride on" aria-live="polite">' + title + '<p>Bus ' + esc(b.id) + ', ' + esc(busNear(b)) + (b.late >= 2 ? ' · ' + Math.round(b.late) + ' min behind the timetable' : '') + '.</p>' +
+    return '<section class="card ride on" aria-live="polite">' + title + '<p>Bus ' + esc(b.id) + ', ' + esc(busNear(b)) + (b.at !== 'monte' && b.late >= 2 ? ' · ' + Math.round(b.late) + ' min behind the timetable' : '') + '.' +
+      (waitNote(b) ? ' ' + esc(waitNote(b)) : '') + '</p>' +
       '<ul class="facts">' + facts.map(f => '<li><span>' + f[0] + '</span><b>' + f[1] + '</b></li>').join('') + '</ul>' + ask + '</section>';
   }
 
