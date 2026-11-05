@@ -1232,7 +1232,12 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
      GPS reports. Each report is compared with where the phone was at that report's time, not now, because the feed
      can be a minute behind. Three reports in a row within ~60 m (plus GPS error) make a candidate, which the person
      confirms with one tap. Without location, they can pick their bus from a list. */
-  const RIDE_NEAR_M = 60, RIDE_RUN = 3, RIDE_OFF_M = 300, RIDE_KEEP_MS = 6 * MIN, RIDE_AUTO_MS = 25 * MIN;
+  const RIDE_NEAR_M = 60, RIDE_RUN = 3, RIDE_OFF_M = 300, RIDE_OFF_RUN = 3, RIDE_OFF_ACC = 150, RIDE_KEEP_MS = 6 * MIN, RIDE_AUTO_MS = 25 * MIN;
+  // The phone's latest location error in metres when it is only approximate (Precise Location off), else 0.
+  const RIDE_COARSE_M = 200;
+  const phoneCoarse = () => { const s = ride.track[ride.track.length - 1]; return s && s.acc > RIDE_COARSE_M ? s.acc : 0; };
+  const coarseKm = (acc) => (acc >= 1000 ? 'about ' + Math.round(acc / 100) / 10 + ' km' : 'about ' + Math.round(acc / 50) * 50 + ' m');
+  const PRECISE_HOW = 'To fix it on an iPhone: Settings → Privacy & Security → Location Services, open your browser (Safari Websites, or Chrome) and turn on Precise Location.';
   const ride = { mode: 'idle', watch: null, track: [], fixes: new Map(), cand: null, no: new Set(), started: 0, auto: false, err: '', away: 0,
     on: (() => { const r = store.get('s5.ride', null); return r && r.busId && Date.now() - r.at < 2 * 3600000 ? r : null; })() };
   if (ride.on) ride.mode = 'riding';
@@ -1356,10 +1361,12 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       if (b && ((b.dirId === ride.on.dirId && b.pos >= lastIdx(dir) - 0.25) || atLineEnd(ride.on, b))) { rideEnd('You\'ve reached ' + stopTitle(dir.stops[lastIdx(dir)]), 'last stop'); return; }
       if (!b && now - ride.on.at > 5 * MIN && now - (ride.lastSeen || ride.on.at) > 5 * MIN) { rideEnd('Your bus has dropped out of live GPS, so the ride has ended'); return; }
       if (b) ride.lastSeen = now;
-      // Got off: the phone has been well away from the bus for its last two reports.
+      // Got off: the phone has been well away from the bus for its last three reports, by more than its own location
+      // error. An approximate location (Precise Location off) can't tell, so then the ride ends at the last stop or on
+      // "I got off". (On 3 Nov an approximate fix ended a ride on bus 32998 five times in 15 minutes.)
       const arr = ride.fixes.get(ride.on.busId) || [];
-      if (ride.watch != null && arr.length >= 2) {
-        const far = arr.slice(-2).every(f => { const ph = phoneAt(f.t); return ph && distM(ph.ll, f.ll) > RIDE_OFF_M; });
+      if (ride.watch != null && arr.length >= RIDE_OFF_RUN) {
+        const far = arr.slice(-RIDE_OFF_RUN).every(f => { const ph = phoneAt(f.t); return ph && ph.acc <= RIDE_OFF_ACC && distM(ph.ll, f.ll) - ph.acc > RIDE_OFF_M; });
         if (far) rideEnd('Looks like you got off. Have a good day!', 'got off');
       }
     }
@@ -1425,7 +1432,9 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       return '<section class="card ride"><div class="row1"><h3>On an S5 bus now?</h3><button class="chip" data-action="ride-start">I\'m on a bus</button></div></section>';
     }
     if (ride.mode === 'searching' || ride.mode === 'pick') {
+      const coarse = phoneCoarse();
       const head = ride.mode === 'pick' ? '<p>' + esc(ride.err) + '</p>'
+        : coarse ? '<p>Your phone is sharing only its approximate location (to ' + coarseKm(coarse) + '), so the app can\'t match it to a bus. Pick your bus below. ' + esc(PRECISE_HOW) + '</p>'
         : '<p>' + (ride.auto ? 'It\'s around your commute time, so the app is checking whether you\'re on your bus. ' : '') + 'Matching your location with the buses\' GPS. Keep this screen open; it takes about a minute.</p>';
       return '<section class="card ride"><div class="row1"><h3>' + (ride.mode === 'pick' ? 'Which bus are you on?' : 'Looking for your bus…') + '</h3><button class="chip" data-action="ride-stop">Stop</button></div>' + head +
         (ride.mode === 'pick' ? ridePickHtml() : '<details><summary class="linklike" style="margin-top:8px">Or pick your bus yourself</summary>' + ridePickHtml() + '</details>') + '</section>';
@@ -1466,6 +1475,7 @@ input[type=checkbox]{width:22px;height:22px;accent-color:var(--gold);flex:none}
       '<p class="hint"><button class="linklike" data-action="privacy">Privacy notice</button></p></div>';
     return '<section class="card ride on" aria-live="polite">' + title + '<p>Bus ' + esc(b.id) + ', ' + esc(busNear(b)) + (b.at !== 'monte' && b.late >= 2 ? ' · ' + Math.round(b.late) + ' min behind the timetable' : '') + '.' +
       (waitNote(b) ? ' ' + esc(waitNote(b)) : '') + '</p>' +
+      (phoneCoarse() && ride.watch != null ? '<p class="hint">Your phone is sharing only its approximate location, so the app won\'t end this ride by itself: tap I got off when you do. ' + esc(PRECISE_HOW) + '</p>' : '') +
       '<ul class="facts">' + facts.map(f => '<li><span>' + f[0] + '</span><b>' + f[1] + '</b></li>').join('') + '</ul>' + ask + '</section>';
   }
 
